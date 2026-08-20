@@ -1,5 +1,5 @@
 --[================================================================]--
--- JIM HUB (Combat, Car Changer, & Settings) - Welcome Popup Version
+-- JIM HUB (Combat, Vehicles, Auto Loot, Speed, Inf Jump, & Settings)
 --[================================================================]--
 
 local Players = game:GetService("Players")
@@ -11,12 +11,23 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui", 10)
 if not playerGui then return end
 
--- Safe Remote Retrieval
+-- Safe Remote Function & Remote Event Retrieval
+local remoteFunction = nil
 local remoteEvent = nil
+
 task.spawn(function()
 	pcall(function()
+		remoteFunction = ReplicatedStorage:WaitForChild("Function", 5)
 		remoteEvent = ReplicatedStorage:WaitForChild("Event", 5)
 	end)
+	if not remoteFunction then
+		for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
+			if descendant:IsA("RemoteFunction") then
+				remoteFunction = descendant
+				break
+			end
+		end
+	end
 	if not remoteEvent then
 		for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
 			if descendant:IsA("RemoteEvent") then
@@ -37,8 +48,17 @@ local showVisualizer = false
 local toggledMode = false
 local forceThirdPersonMobile = false 
 local vehicleModActive = false 
+local autoLootActive = false
+local lootAllMode = true
 
--- Store original camera and mouse states
+-- New Features States (CFrame Speed, Inf Jump, Noclip)
+local speedModActive = false
+local customCFrameSpeed = 24
+local customJumpPower = 50
+local noclipActive = false
+local infJumpActive = false
+
+-- Store original camera, mouse, and character movement states
 local originalCameraMode = player.CameraMode
 local originalCameraMinZoom = player.CameraMinZoomDistance
 local originalCameraMaxZoom = player.CameraMaxZoomDistance
@@ -96,8 +116,8 @@ toggleStroke.Parent = toggleGuiBtn
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 320, 0, 290)
-mainFrame.Position = UDim2.new(0.05, 0, 0.35, 0)
+mainFrame.Size = UDim2.new(0, 320, 0, 315)
+mainFrame.Position = UDim2.new(0.05, 0, 0.32, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
@@ -129,14 +149,14 @@ titleLabel.Size = UDim2.new(1, -20, 1, 0)
 titleLabel.Position = UDim2.new(0, 12, 0, 0)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Font = Enum.Font.GothamBold
-titleLabel.Text = "JIM HUB <font color='#888888'>// V2</font>"
+titleLabel.Text = "JIM HUB <font color='#888888'>// V2.5</font>"
 titleLabel.RichText = true
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 12
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 titleLabel.Parent = titleBar
 
--- Tab Switch Buttons (3 Tabs: Combat, Vehicles, Settings)
+-- Tab Switch Buttons
 local tabHolder = Instance.new("Frame")
 tabHolder.Size = UDim2.new(0.92, 0, 0, 28)
 tabHolder.Position = UDim2.new(0.04, 0, 0, 44)
@@ -144,23 +164,24 @@ tabHolder.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 tabHolder.Parent = mainFrame
 Instance.new("UICorner", tabHolder).CornerRadius = UDim.new(0, 8)
 
-local function createTabBtn(name, posX)
+local function createTabBtn(name, posX, sizeX)
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0.32, 0, 1, 0)
+	btn.Size = UDim2.new(sizeX or 0.23, 0, 1, 0)
 	btn.Position = UDim2.new(posX, 0, 0, 0)
 	btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 	btn.Font = Enum.Font.GothamBold
 	btn.Text = name
 	btn.TextColor3 = Color3.fromRGB(160, 160, 160)
-	btn.TextSize = 11
+	btn.TextSize = 10
 	btn.Parent = tabHolder
 	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 	return btn
 end
 
-local combatTabBtn = createTabBtn("Combat", 0.01)
-local vehicleTabBtn = createTabBtn("Vehicles", 0.34)
-local settingsTabBtn = createTabBtn("Settings", 0.67)
+local combatTabBtn = createTabBtn("Combat", 0.01, 0.23)
+local vehicleTabBtn = createTabBtn("Vehicles", 0.25, 0.23)
+local lootTabBtn = createTabBtn("Auto Loot", 0.49, 0.25)
+local settingsTabBtn = createTabBtn("Settings", 0.75, 0.23)
 
 -- Containers for Tabs
 local combatContainer = Instance.new("Frame")
@@ -179,11 +200,20 @@ vehicleContainer.CanvasSize = UDim2.new(0, 0, 0, 260)
 vehicleContainer.ScrollBarThickness = 4
 vehicleContainer.Parent = mainFrame
 
-local settingsContainer = Instance.new("Frame")
+local lootContainer = Instance.new("Frame")
+lootContainer.Size = UDim2.new(1, 0, 0.72, 0)
+lootContainer.Position = UDim2.new(0, 0, 0, 80)
+lootContainer.BackgroundTransparency = 1
+lootContainer.Visible = false
+lootContainer.Parent = mainFrame
+
+local settingsContainer = Instance.new("ScrollingFrame")
 settingsContainer.Size = UDim2.new(1, 0, 0.72, 0)
 settingsContainer.Position = UDim2.new(0, 0, 0, 80)
 settingsContainer.BackgroundTransparency = 1
 settingsContainer.Visible = false
+settingsContainer.CanvasSize = UDim2.new(0, 0, 0, 255)
+settingsContainer.ScrollBarThickness = 4
 settingsContainer.Parent = mainFrame
 
 --[ Combat Tab Contents ]--
@@ -367,10 +397,244 @@ for propName, defaultVal in pairs(defaultVehicleProperties) do
 end
 vehicleContainer.CanvasSize = UDim2.new(0, 0, 0, yOffset + 15)
 
+--[ Auto Loot Tab Contents ]--
+local lootToggleBtn = Instance.new("TextButton")
+lootToggleBtn.Size = UDim2.new(0.92, 0, 0, 26)
+lootToggleBtn.Position = UDim2.new(0.04, 0, 0.01, 0)
+lootToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+lootToggleBtn.Font = Enum.Font.GothamBold
+lootToggleBtn.Text = "Auto Loot: OFF"
+lootToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+lootToggleBtn.TextSize = 10
+lootToggleBtn.Parent = lootContainer
+Instance.new("UICorner", lootToggleBtn).CornerRadius = UDim.new(0, 6)
+
+local dropSelectedBtn = Instance.new("TextButton")
+dropSelectedBtn.Size = UDim2.new(0.44, 0, 0, 26)
+dropSelectedBtn.Position = UDim2.new(0.04, 0, 0.17, 0)
+dropSelectedBtn.BackgroundColor3 = Color3.fromRGB(140, 75, 25)
+dropSelectedBtn.Font = Enum.Font.GothamBold
+dropSelectedBtn.Text = "Drop Selected"
+dropSelectedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+dropSelectedBtn.TextSize = 10
+dropSelectedBtn.Parent = lootContainer
+Instance.new("UICorner", dropSelectedBtn).CornerRadius = UDim.new(0, 6)
+
+local dropAllBtn = Instance.new("TextButton")
+dropAllBtn.Size = UDim2.new(0.44, 0, 0, 26)
+dropAllBtn.Position = UDim2.new(0.52, 0, 0.17, 0)
+dropAllBtn.BackgroundColor3 = Color3.fromRGB(180, 45, 45)
+dropAllBtn.Font = Enum.Font.GothamBold
+dropAllBtn.Text = "Drop All Items"
+dropAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+dropAllBtn.TextSize = 10
+dropAllBtn.Parent = lootContainer
+Instance.new("UICorner", dropAllBtn).CornerRadius = UDim.new(0, 6)
+
+local modeToggleBtn = Instance.new("TextButton")
+modeToggleBtn.Size = UDim2.new(0.92, 0, 0, 24)
+modeToggleBtn.Position = UDim2.new(0.04, 0, 0.32, 0)
+modeToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+modeToggleBtn.Font = Enum.Font.GothamBold
+modeToggleBtn.Text = "Mode: Loot All (Workspace.Loot)"
+modeToggleBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+modeToggleBtn.TextSize = 9
+modeToggleBtn.Parent = lootContainer
+Instance.new("UICorner", modeToggleBtn).CornerRadius = UDim.new(0, 6)
+
+local lootListHeader = Instance.new("TextLabel")
+lootListHeader.Size = UDim2.new(0.92, 0, 0, 16)
+lootListHeader.Position = UDim2.new(0.04, 0, 0.44, 0)
+lootListHeader.BackgroundTransparency = 1
+lootListHeader.Font = Enum.Font.GothamBold
+lootListHeader.Text = "Detected Loot Items (Auto-Updating):"
+lootListHeader.TextColor3 = Color3.fromRGB(170, 170, 170)
+lootListHeader.TextSize = 10
+lootListHeader.TextXAlignment = Enum.TextXAlignment.Left
+lootListHeader.Parent = lootContainer
+
+local lootScrollingFrame = Instance.new("ScrollingFrame")
+lootScrollingFrame.Size = UDim2.new(0.92, 0, 0.43, 0)
+lootScrollingFrame.Position = UDim2.new(0.04, 0, 0.53, 0)
+lootScrollingFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+lootScrollingFrame.BorderSizePixel = 0
+lootScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+lootScrollingFrame.ScrollBarThickness = 4
+lootScrollingFrame.Parent = lootContainer
+Instance.new("UICorner", lootScrollingFrame).CornerRadius = UDim.new(0, 6)
+local lootScrollStroke = Instance.new("UIStroke")
+lootScrollStroke.Color = Color3.fromRGB(40, 40, 40)
+lootScrollStroke.Parent = lootScrollingFrame
+
+local selectedLootItems = {}
+
+lootToggleBtn.MouseButton1Click:Connect(function()
+	autoLootActive = not autoLootActive
+	lootToggleBtn.Text = autoLootActive and "Auto Loot: ON" or "Auto Loot: OFF"
+	lootToggleBtn.BackgroundColor3 = autoLootActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
+end)
+
+modeToggleBtn.MouseButton1Click:Connect(function()
+	lootAllMode = not lootAllMode
+	if lootAllMode then
+		modeToggleBtn.Text = "Mode: Loot All (Workspace.Loot)"
+		modeToggleBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+	else
+		modeToggleBtn.Text = "Mode: Selected Items Only"
+		modeToggleBtn.TextColor3 = Color3.fromRGB(80, 220, 255)
+	end
+end)
+
+dropSelectedBtn.MouseButton1Click:Connect(function()
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack and remoteEvent then
+		for itemName, isSelected in pairs(selectedLootItems) do
+			if isSelected then
+				local bpItem = backpack:FindFirstChild(itemName)
+				if bpItem then
+					pcall(function()
+						remoteEvent:FireServer("Loot", "LootUnequip", bpItem, false)
+					end)
+				end
+			end
+		end
+	end
+end)
+
+dropAllBtn.MouseButton1Click:Connect(function()
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack and remoteEvent then
+		for _, bpItem in ipairs(backpack:GetChildren()) do
+			local itemName = bpItem.Name
+			local isBackpack = string.find(itemName, "Backpack") ~= nil
+			local isArmor = string.find(itemName, "Armor") ~= nil
+			
+			if not isBackpack and not isArmor then
+				pcall(function()
+					remoteEvent:FireServer("Loot", "LootUnequip", bpItem, false)
+				end)
+			end
+		end
+	end
+end)
+
 --[ Settings Tab Contents ]--
+local stY = 8
+
+-- 1. CFrame Speed Toggle & Box
+local speedToggleBtn = Instance.new("TextButton")
+speedToggleBtn.Size = UDim2.new(0.58, 0, 0, 30)
+speedToggleBtn.Position = UDim2.new(0.04, 0, 0, stY)
+speedToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+speedToggleBtn.Font = Enum.Font.GothamBold
+speedToggleBtn.Text = "CFrame Speed: OFF"
+speedToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedToggleBtn.TextSize = 10
+speedToggleBtn.Parent = settingsContainer
+Instance.new("UICorner", speedToggleBtn).CornerRadius = UDim.new(0, 6)
+
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.new(0.31, 0, 0, 30)
+speedBox.Position = UDim2.new(0.65, 0, 0, stY)
+speedBox.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedBox.Font = Enum.Font.GothamBold
+speedBox.Text = tostring(customCFrameSpeed)
+speedBox.TextSize = 11
+speedBox.ClearTextOnFocus = false
+speedBox.Parent = settingsContainer
+Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 6)
+
+speedToggleBtn.MouseButton1Click:Connect(function()
+	speedModActive = not speedModActive
+	speedToggleBtn.Text = speedModActive and "CFrame Speed: ON" or "CFrame Speed: OFF"
+	speedToggleBtn.BackgroundColor3 = speedModActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
+end)
+
+speedBox.FocusLost:Connect(function()
+	local val = tonumber(speedBox.Text)
+	if val and val > 0 then customCFrameSpeed = val end
+	speedBox.Text = tostring(customCFrameSpeed)
+end)
+
+stY = stY + 38
+
+-- 2. JumpPower Box
+local jumpLbl = Instance.new("TextLabel")
+jumpLbl.Size = UDim2.new(0.58, 0, 0, 26)
+jumpLbl.Position = UDim2.new(0.04, 0, 0, stY)
+jumpLbl.BackgroundTransparency = 1
+jumpLbl.Font = Enum.Font.GothamBold
+jumpLbl.Text = "JumpPower Value:"
+jumpLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+jumpLbl.TextSize = 11
+jumpLbl.TextXAlignment = Enum.TextXAlignment.Left
+jumpLbl.Parent = settingsContainer
+
+local jumpBox = Instance.new("TextBox")
+jumpBox.Size = UDim2.new(0.31, 0, 0, 26)
+jumpBox.Position = UDim2.new(0.65, 0, 0, stY)
+jumpBox.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+jumpBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+jumpBox.Font = Enum.Font.GothamBold
+jumpBox.Text = tostring(customJumpPower)
+jumpBox.TextSize = 11
+jumpBox.ClearTextOnFocus = false
+jumpBox.Parent = settingsContainer
+Instance.new("UICorner", jumpBox).CornerRadius = UDim.new(0, 6)
+
+jumpBox.FocusLost:Connect(function()
+	local val = tonumber(jumpBox.Text)
+	if val and val >= 0 then customJumpPower = val end
+	jumpBox.Text = tostring(customJumpPower)
+end)
+
+stY = stY + 34
+
+-- 3. Noclip Toggle
+local noclipToggleBtn = Instance.new("TextButton")
+noclipToggleBtn.Size = UDim2.new(0.92, 0, 0, 30)
+noclipToggleBtn.Position = UDim2.new(0.04, 0, 0, stY)
+noclipToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+noclipToggleBtn.Font = Enum.Font.GothamBold
+noclipToggleBtn.Text = "Noclip: OFF"
+noclipToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+noclipToggleBtn.TextSize = 10
+noclipToggleBtn.Parent = settingsContainer
+Instance.new("UICorner", noclipToggleBtn).CornerRadius = UDim.new(0, 6)
+
+noclipToggleBtn.MouseButton1Click:Connect(function()
+	noclipActive = not noclipActive
+	noclipToggleBtn.Text = noclipActive and "Noclip: ON" or "Noclip: OFF"
+	noclipToggleBtn.BackgroundColor3 = noclipActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
+end)
+
+stY = stY + 38
+
+-- 4. Infinite Jump Toggle (Using Working JumpRequest Hook)
+local infJumpToggleBtn = Instance.new("TextButton")
+infJumpToggleBtn.Size = UDim2.new(0.92, 0, 0, 30)
+infJumpToggleBtn.Position = UDim2.new(0.04, 0, 0, stY)
+infJumpToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+infJumpToggleBtn.Font = Enum.Font.GothamBold
+infJumpToggleBtn.Text = "Infinite Jump: OFF"
+infJumpToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+infJumpToggleBtn.TextSize = 10
+infJumpToggleBtn.Parent = settingsContainer
+Instance.new("UICorner", infJumpToggleBtn).CornerRadius = UDim.new(0, 6)
+
+infJumpToggleBtn.MouseButton1Click:Connect(function()
+	infJumpActive = not infJumpActive
+	infJumpToggleBtn.Text = infJumpActive and "Infinite Jump: ON" or "Infinite Jump: OFF"
+	infJumpToggleBtn.BackgroundColor3 = infJumpActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
+end)
+
+stY = stY + 38
+
+-- 5. Mobile 3rd Person Toggle
 local mobileTPLabel = Instance.new("TextLabel")
-mobileTPLabel.Size = UDim2.new(0.65, 0, 0, 36)
-mobileTPLabel.Position = UDim2.new(0.04, 0, 0.08, 0)
+mobileTPLabel.Size = UDim2.new(0.65, 0, 0, 32)
+mobileTPLabel.Position = UDim2.new(0.04, 0, 0, stY)
 mobileTPLabel.BackgroundTransparency = 1
 mobileTPLabel.Font = Enum.Font.GothamBold
 mobileTPLabel.Text = "Force 3rd Person (Mobile):"
@@ -380,8 +644,8 @@ mobileTPLabel.TextXAlignment = Enum.TextXAlignment.Left
 mobileTPLabel.Parent = settingsContainer
 
 local mobileTPBtn = Instance.new("TextButton")
-mobileTPBtn.Size = UDim2.new(0.24, 0, 0, 36)
-mobileTPBtn.Position = UDim2.new(0.72, 0, 0.08, 0)
+mobileTPBtn.Size = UDim2.new(0.24, 0, 0, 32)
+mobileTPBtn.Position = UDim2.new(0.72, 0, 0, stY)
 mobileTPBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
 mobileTPBtn.Font = Enum.Font.GothamBold
 mobileTPBtn.Text = "OFF"
@@ -404,7 +668,7 @@ mobileTPBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
---[ Welcome Popup Modal (PC Player Guide) ]--
+--[ Welcome Popup Modal ]--
 local modalOverlay = Instance.new("Frame")
 modalOverlay.Name = "WelcomeModal"
 modalOverlay.Size = UDim2.new(1, 0, 1, 0)
@@ -471,6 +735,7 @@ end)
 local function switchTab(activeTab)
 	combatContainer.Visible = (activeTab == "Combat")
 	vehicleContainer.Visible = (activeTab == "Vehicle")
+	lootContainer.Visible = (activeTab == "Loot")
 	settingsContainer.Visible = (activeTab == "Settings")
 
 	combatTabBtn.BackgroundColor3 = (activeTab == "Combat") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
@@ -479,12 +744,16 @@ local function switchTab(activeTab)
 	vehicleTabBtn.BackgroundColor3 = (activeTab == "Vehicle") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
 	vehicleTabBtn.TextColor3 = (activeTab == "Vehicle") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
 
+	lootTabBtn.BackgroundColor3 = (activeTab == "Loot") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
+	lootTabBtn.TextColor3 = (activeTab == "Loot") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
+
 	settingsTabBtn.BackgroundColor3 = (activeTab == "Settings") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
 	settingsTabBtn.TextColor3 = (activeTab == "Settings") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
 end
 
 combatTabBtn.MouseButton1Click:Connect(function() switchTab("Combat") end)
 vehicleTabBtn.MouseButton1Click:Connect(function() switchTab("Vehicle") end)
+lootTabBtn.MouseButton1Click:Connect(function() switchTab("Loot") end)
 settingsTabBtn.MouseButton1Click:Connect(function() switchTab("Settings") end)
 
 -- UI Toggle / Minimize Functionality
@@ -547,6 +816,20 @@ autoBreakToggleBtn.MouseButton1Click:Connect(function()
 	if not autoBreakRunning then targetLabel.Text = "Hits: 0 | Breaks: 0" end
 end)
 
+-- Working Infinite Jump Listener via JumpRequest
+UserInputService.JumpRequest:Connect(function()
+	if infJumpActive then
+		local character = player.Character
+		if character then
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+			end
+		end
+	end
+end)
+
+-- Key inputs (G for camera unlock)
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 	if input.KeyCode == Enum.KeyCode.G then
@@ -577,175 +860,285 @@ local currentBreaks = 0
 -- Main Processing Loop
 --[================================================================]--
 
-task.spawn(function()
-	while true do
-		local character = player.Character
-		if character then
-			local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-			
-			if forceThirdPersonMobile then
-				player.CameraMode = Enum.CameraMode.Classic
-				if player.CameraMinZoomDistance < 10 then player.CameraMinZoomDistance = 10 end
-				if player.CameraMaxZoomDistance < 400 then player.CameraMaxZoomDistance = 400 end
-			end
-			
-			if toggledMode and player.CameraMinZoomDistance < 10 then
-				player.CameraMinZoomDistance = 10
-			end
-			
-			if humanoidRootPart and showVisualizer then
-				rangeRing.Transparency = 0.7
-				rangeRing.CFrame = CFrame.new(humanoidRootPart.Position - Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.rad(90))
-				rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
-			else
-				rangeRing.Transparency = 1
-			end
-			
-			-- Vehicle Tracker Loop
-			local vehiclesFolder = workspace:FindFirstChild("Vehicles")
-			if vehiclesFolder then
-				local targetVehicle = vehiclesFolder:FindFirstChild("Claptima")
-				if not targetVehicle then
-					local children = vehiclesFolder:GetChildren()
-					if #children > 0 then targetVehicle = children[1] end
-				end
-				
-				if targetVehicle then
-					vehicleStatus.Text = "Target: " .. targetVehicle.Name
-					local propFolder = targetVehicle:FindFirstChild("VehicleProperty")
-					
-					if not originalCarDetected then
-						for propName, box in pairs(propertyBoxes) do
-							local nativeVal = nil
-							pcall(function()
-								if propFolder then nativeVal = propFolder:GetAttribute(propName) or propFolder[propName] end
-								if not nativeVal then nativeVal = targetVehicle:GetAttribute(propName) or targetVehicle[propName] end
-							end)
-							if nativeVal then
-								originalVehicleProperties[propName] = nativeVal
-								box.Text = tostring(nativeVal)
-							end
-						end
-						originalCarDetected = true
-					end
-					
-					for propName, box in pairs(propertyBoxes) do
-						local appliedVal = nil
-						if vehicleModActive then
-							appliedVal = tonumber(box.Text)
-						else
-							appliedVal = originalVehicleProperties[propName]
-							if not box.IsFocused and appliedVal then box.Text = tostring(appliedVal) end
-						end
-						
-						if appliedVal then
-							pcall(function()
-								if propFolder then
-									propFolder:SetAttribute(propName, appliedVal)
-									propFolder[propName] = appliedVal
-								end
-								targetVehicle:SetAttribute(propName, appliedVal)
-								targetVehicle[propName] = appliedVal
-							end)
-						end
-					end
-					
-					if vehicleModActive then
-						local targetGasVal = tonumber(gasTextBox.Text)
-						if targetGasVal then
-							local gasObj = targetVehicle:FindFirstChild("gasLevel")
-							if gasObj then pcall(function() gasObj.Value = targetGasVal end) end
-						end
-					end
-				else
-					vehicleStatus.Text = "Target Vehicle: None found"
-					originalCarDetected = false
-				end
-			else
-				vehicleStatus.Text = "Target Vehicle: workspace.Vehicles missing!"
-				originalCarDetected = false
-			end
-			
-			-- Instant NPC Combat
-			currentHits = 0
-			if isRunning and humanoidRootPart then
-				local npcsFolder = workspace:FindFirstChild("NPCs")
-				if npcsFolder then
-					for _, npcModel in ipairs(npcsFolder:GetChildren()) do
-						if npcModel:IsA("Model") then
-							local humanoid = npcModel:FindFirstChildOfClass("Humanoid")
-							local rootPart = npcModel:FindFirstChild("HumanoidRootPart") or npcModel:FindFirstChild("RootPart") or npcModel:FindFirstChild("Head")
-							
-							if humanoid and rootPart and humanoid.Health > 0 then
-								local distance = (rootPart.Position - humanoidRootPart.Position).Magnitude
-								if distance <= ATTACK_RANGE then
-									currentHits = currentHits + 1
-									pcall(function()
-										local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
-										if ev then
-											ev:FireServer("Punches", "ReplicateSound", humanoidRootPart, "Swoosh")
-											ev:FireServer("NPCs", "Damage", humanoid, DAMAGE_AMOUNT)
-										end
-									end)
-								end
-							end
-						end
-					end
+RunService.Heartbeat:Connect(function(dt)
+	local character = player.Character
+	if character then
+		local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		
+		-- CFrame Speed Handler
+		if humanoidRootPart and humanoid then
+			if speedModActive then
+				humanoid.WalkSpeed = 16 -- keep base normal to prevent native prediction glitches
+				local moveDir = humanoid.MoveDirection
+				if moveDir.Magnitude > 0 then
+					humanoidRootPart.CFrame = humanoidRootPart.CFrame + (moveDir * customCFrameSpeed * dt)
 				end
 			end
-
-			-- Instant Multi-Hit Auto Break
-			currentBreaks = 0
-			if autoBreakRunning and humanoidRootPart then
-				local mapFolder = workspace:FindFirstChild("Map")
-				if mapFolder then
-					local buildingsFolder = mapFolder:FindFirstChild("Buildings")
-					if buildingsFolder then
-						local validTargetNames = { ["ATM"] = true, ["CashRegister"] = true, ["Vault"] = true, ["Safe"] = true }
-						
-						for _, obj in ipairs(buildingsFolder:GetDescendants()) do
-							if obj:IsA("Model") and validTargetNames[obj.Name] then
-								local targetPart = obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("RootPart") or obj:FindFirstChild("Head") or obj:FindFirstChildWhichIsA("BasePart")
-								
-								if targetPart then
-									local health = 100
-									local humanoid = obj:FindFirstChildOfClass("Humanoid")
-									if humanoid then
-										health = humanoid.Health
-									else
-										local healthVal = obj:FindFirstChild("Health") or obj:FindFirstChild("HP")
-										if healthVal then
-											pcall(function() health = healthVal.Value end)
-										else
-											local attrHealth = obj:GetAttribute("Health") or obj:GetAttribute("HP")
-											if attrHealth then health = attrHealth end
-										end
-									end
-									
-									if health > 0 then
-										local distance = (targetPart.Position - humanoidRootPart.Position).Magnitude
-										if distance <= ATTACK_RANGE then
-											currentBreaks = currentBreaks + 1
-											pcall(function()
-												local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
-												if ev then
-													ev:FireServer("DamageToOpen", "Damage", obj, 1000, "melee")
-												end
-											end)
-										end
-									end
-								end
-							end
-						end
-					end
-				end
+			
+			-- JumpPower Handler
+			if customJumpPower then
+				pcall(function()
+					humanoid.JumpPower = customJumpPower
+					humanoid.UseJumpPower = true
+				end)
 			end
-
-			targetLabel.Text = string.format("Hits: %d | Breaks: %d", currentHits, currentBreaks)
 		end
 		
-		RunService.Heartbeat:Wait()
+		-- Noclip Handler
+		if noclipActive then
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = false
+				end
+			end
+		end
+		
+		if forceThirdPersonMobile then
+			player.CameraMode = Enum.CameraMode.Classic
+			if player.CameraMinZoomDistance < 10 then player.CameraMinZoomDistance = 10 end
+			if player.CameraMaxZoomDistance < 400 then player.CameraMaxZoomDistance = 400 end
+		end
+		
+		if toggledMode and player.CameraMinZoomDistance < 10 then
+			player.CameraMinZoomDistance = 10
+		end
+		
+		if humanoidRootPart and showVisualizer then
+			rangeRing.Transparency = 0.7
+			rangeRing.CFrame = CFrame.new(humanoidRootPart.Position - Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.rad(90))
+			rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
+		else
+			rangeRing.Transparency = 1
+		end
+		
+		-- Auto Loot Dynamic Updating & Handling
+		local lootFolder = workspace:FindFirstChild("Loot")
+		local backpack = player:FindFirstChild("Backpack")
+		local discoveredItems = {}
+		
+		if lootFolder then
+			for _, lootItem in ipairs(lootFolder:GetChildren()) do
+				discoveredItems[lootItem.Name] = true
+			end
+		end
+		if backpack then
+			for _, bpItem in ipairs(backpack:GetChildren()) do
+				discoveredItems[bpItem.Name] = true
+			end
+		end
+		
+		local itemY = 0
+		local existingGuiItems = {}
+		for _, child in ipairs(lootScrollingFrame:GetChildren()) do
+			if child:IsA("TextButton") then existingGuiItems[child.Name] = child end
+		end
+		
+		for itemName, _ in pairs(discoveredItems) do
+			if selectedLootItems[itemName] == nil then
+				selectedLootItems[itemName] = false
+			end
+			
+			local itemBtn = existingGuiItems[itemName]
+			if not itemBtn then
+				itemBtn = Instance.new("TextButton")
+				itemBtn.Name = itemName
+				itemBtn.Size = UDim2.new(1, -8, 0, 24)
+				itemBtn.Font = Enum.Font.GothamMedium
+				itemBtn.TextSize = 10
+				itemBtn.Parent = lootScrollingFrame
+				Instance.new("UICorner", itemBtn).CornerRadius = UDim.new(0, 4)
+				
+				itemBtn.MouseButton1Click:Connect(function()
+					selectedLootItems[itemName] = not selectedLootItems[itemName]
+				end)
+			end
+			
+			if selectedLootItems[itemName] then
+				itemBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 35)
+				itemBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+				itemBtn.Text = "✓ " .. itemName
+			else
+				itemBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+				itemBtn.TextColor3 = Color3.fromRGB(160, 160, 160)
+				itemBtn.Text = "□ " .. itemName
+			end
+			
+			itemBtn.Position = UDim2.new(0, 4, 0, itemY)
+			itemY = itemY + 28
+		end
+		
+		for name, btn in pairs(existingGuiItems) do
+			if not discoveredItems[name] then
+				btn:Destroy()
+			end
+		end
+		lootScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, itemY + 5)
+		
+		if autoLootActive and lootFolder and remoteFunction then
+			for _, lootItem in ipairs(lootFolder:GetChildren()) do
+				local name = lootItem.Name
+				local shouldLoot = false
+				
+				if lootAllMode then
+					shouldLoot = true
+				elseif selectedLootItems[name] then
+					shouldLoot = true
+				end
+				
+				if shouldLoot then
+					local targetHandle = lootItem:FindFirstChild("Handle") or lootItem:FindFirstChildWhichIsA("BasePart")
+					if targetHandle then
+						pcall(function()
+							remoteFunction:InvokeServer("Loot", "LootEquip", targetHandle)
+						end)
+					end
+				end
+			end
+		end
+		
+		-- Vehicle Tracker Loop
+		local vehiclesFolder = workspace:FindFirstChild("Vehicles")
+		if vehiclesFolder then
+			local targetVehicle = vehiclesFolder:FindFirstChild("Claptima")
+			if not targetVehicle then
+				local children = vehiclesFolder:GetChildren()
+				if #children > 0 then targetVehicle = children[1] end
+			end
+			
+			if targetVehicle then
+				vehicleStatus.Text = "Target: " .. targetVehicle.Name
+				local propFolder = targetVehicle:FindFirstChild("VehicleProperty")
+				
+				if not originalCarDetected then
+					for propName, box in pairs(propertyBoxes) do
+						local nativeVal = nil
+						pcall(function()
+							if propFolder then nativeVal = propFolder:GetAttribute(propName) or propFolder[propName] end
+							if not nativeVal then nativeVal = targetVehicle:GetAttribute(propName) or targetVehicle[propName] end
+						end)
+						if nativeVal then
+							originalVehicleProperties[propName] = nativeVal
+							box.Text = tostring(nativeVal)
+						end
+					end
+					originalCarDetected = true
+				end
+				
+				for propName, box in pairs(propertyBoxes) do
+					local appliedVal = nil
+					if vehicleModActive then
+						appliedVal = tonumber(box.Text)
+					else
+						appliedVal = originalVehicleProperties[propName]
+						if not box.IsFocused and appliedVal then box.Text = tostring(appliedVal) end
+					end
+					
+					if appliedVal then
+						pcall(function()
+							if propFolder then
+								propFolder:SetAttribute(propName, appliedVal)
+								propFolder[propName] = appliedVal
+							end
+							targetVehicle:SetAttribute(propName, appliedVal)
+							targetVehicle[propName] = appliedVal
+						end)
+					end
+				end
+				
+				if vehicleModActive then
+					local targetGasVal = tonumber(gasTextBox.Text)
+					if targetGasVal then
+						local gasObj = targetVehicle:FindFirstChild("gasLevel")
+						if gasObj then pcall(function() gasObj.Value = targetGasVal end) end
+					end
+				end
+			else
+				vehicleStatus.Text = "Target Vehicle: None found"
+				originalCarDetected = false
+			end
+		else
+			vehicleStatus.Text = "Target Vehicle: workspace.Vehicles missing!"
+			originalCarDetected = false
+		end
+		
+		-- Instant NPC Combat
+		currentHits = 0
+		if isRunning and humanoidRootPart then
+			local npcsFolder = workspace:FindFirstChild("NPCs")
+			if npcsFolder then
+				for _, npcModel in ipairs(npcsFolder:GetChildren()) do
+					if npcModel:IsA("Model") then
+						local hum = npcModel:FindFirstChildOfClass("Humanoid")
+						local rootPart = npcModel:FindFirstChild("HumanoidRootPart") or npcModel:FindFirstChild("RootPart") or npcModel:FindFirstChild("Head")
+						
+						if hum and rootPart and hum.Health > 0 then
+							local distance = (rootPart.Position - humanoidRootPart.Position).Magnitude
+							if distance <= ATTACK_RANGE then
+								currentHits = currentHits + 1
+								pcall(function()
+									local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
+									if ev then
+										ev:FireServer("Punches", "ReplicateSound", humanoidRootPart, "Swoosh")
+										ev:FireServer("NPCs", "Damage", hum, DAMAGE_AMOUNT)
+									end
+								end)
+							end
+						end
+					end
+				end
+			end
+		end
+
+		-- Instant Multi-Hit Auto Break
+		currentBreaks = 0
+		if autoBreakRunning and humanoidRootPart then
+			local mapFolder = workspace:FindFirstChild("Map")
+			if mapFolder then
+				local buildingsFolder = mapFolder:FindFirstChild("Buildings")
+				if buildingsFolder then
+					local validTargetNames = { ["ATM"] = true, ["CashRegister"] = true, ["Vault"] = true, ["Safe"] = true }
+					
+					for _, obj in ipairs(buildingsFolder:GetDescendants()) do
+						if obj:IsA("Model") and validTargetNames[obj.Name] then
+							local targetPart = obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("RootPart") or obj:FindFirstChild("Head") or obj:FindFirstChildWhichIsA("BasePart")
+							
+							if targetPart then
+								local health = 100
+								local hum = obj:FindFirstChildOfClass("Humanoid")
+								if hum then
+									health = hum.Health
+								else
+									local healthVal = obj:FindFirstChild("Health") or obj:FindFirstChild("HP")
+									if healthVal then
+										pcall(function() health = healthVal.Value end)
+									else
+										local attrHealth = obj:GetAttribute("Health") or obj:GetAttribute("HP")
+										if attrHealth then health = attrHealth end
+									end
+								end
+								
+								if health > 0 then
+									local distance = (targetPart.Position - humanoidRootPart.Position).Magnitude
+									if distance <= ATTACK_RANGE then
+										currentBreaks = currentBreaks + 1
+										pcall(function()
+											local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
+											if ev then
+												ev:FireServer("DamageToOpen", "Damage", obj, 1000, "melee")
+											end
+										end)
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+
+		targetLabel.Text = string.format("Hits: %d | Breaks: %d", currentHits, currentBreaks)
 	end
 end)
 
-print("JIM HUB Loaded Successfully!")
+print("JIM HUB Loaded Successfully with CFrame Speed & Working Inf Jump!")
