@@ -1,5 +1,5 @@
 --[================================================================]--
--- JIM HUB (Combat, Car Changer, & Settings) - Instant Multi-Hit Update
+-- JIM HUB (Combat, Car Changer, & Settings) - Welcome Popup Version
 --[================================================================]--
 
 local Players = game:GetService("Players")
@@ -11,18 +11,15 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui", 10)
 if not playerGui then return end
 
--- Find RemoteEvent dynamically with fallback creation if missing
+-- Safe Remote Retrieval
 local remoteEvent = nil
-pcall(function()
-	for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
-		if descendant:IsA("RemoteEvent") then
-			remoteEvent = descendant
-			break
-		end
-	end
+task.spawn(function()
+	pcall(function()
+		remoteEvent = ReplicatedStorage:WaitForChild("Event", 5)
+	end)
 	if not remoteEvent then
-		for _, descendant in ipairs(game:GetDescendants()) do
-			if descendant:IsA("RemoteEvent") and descendant.Name == "Event" then
+		for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
+			if descendant:IsA("RemoteEvent") then
 				remoteEvent = descendant
 				break
 			end
@@ -30,10 +27,9 @@ pcall(function()
 	end
 end)
 
--- Configuration (Zero Delay / Instant Hit Speed)
+-- Configuration
 local ATTACK_RANGE = 25
-local ATTACK_COOLDOWN = 0
-local DAMAGE_AMOUNT = 13
+local DAMAGE_AMOUNT = 1000
 
 local isRunning = false
 local autoBreakRunning = false
@@ -408,6 +404,69 @@ mobileTPBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
+--[ Welcome Popup Modal (PC Player Guide) ]--
+local modalOverlay = Instance.new("Frame")
+modalOverlay.Name = "WelcomeModal"
+modalOverlay.Size = UDim2.new(1, 0, 1, 0)
+modalOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+modalOverlay.BackgroundTransparency = 0.5
+modalOverlay.ZIndex = 10
+modalOverlay.Parent = screenGui
+
+local modalFrame = Instance.new("Frame")
+modalFrame.Size = UDim2.new(0, 310, 0, 180)
+modalFrame.Position = UDim2.new(0.5, -155, 0.5, -90)
+modalFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+modalFrame.BorderSizePixel = 0
+modalFrame.ZIndex = 11
+modalFrame.Parent = modalOverlay
+
+Instance.new("UICorner", modalFrame).CornerRadius = UDim.new(0, 12)
+local modalStroke = Instance.new("UIStroke")
+modalStroke.Color = Color3.fromRGB(180, 30, 30)
+modalStroke.Thickness = 1.5
+modalStroke.Parent = modalFrame
+
+local modalTitle = Instance.new("TextLabel")
+modalTitle.Size = UDim2.new(1, 0, 0, 40)
+modalTitle.Position = UDim2.new(0, 0, 0, 10)
+modalTitle.BackgroundTransparency = 1
+modalTitle.Font = Enum.Font.GothamBold
+modalTitle.Text = "WELCOME TO JIM HUB"
+modalTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+modalTitle.TextSize = 14
+modalTitle.ZIndex = 12
+modalTitle.Parent = modalFrame
+
+local modalDesc = Instance.new("TextLabel")
+modalDesc.Size = UDim2.new(0.85, 0, 0, 60)
+modalDesc.Position = UDim2.new(0.075, 0, 0, 50)
+modalDesc.BackgroundTransparency = 1
+modalDesc.Font = Enum.Font.GothamMedium
+modalDesc.Text = "PC Players: Press <font color='#FF3C3C'>G</font> to toggle 3rd Person & unlock your mouse freely!"
+modalDesc.RichText = true
+modalDesc.TextColor3 = Color3.fromRGB(200, 200, 200)
+modalDesc.TextSize = 12
+modalDesc.TextWrapped = true
+modalDesc.ZIndex = 12
+modalDesc.Parent = modalFrame
+
+local closePopupBtn = Instance.new("TextButton")
+closePopupBtn.Size = UDim2.new(0.85, 0, 0, 36)
+closePopupBtn.Position = UDim2.new(0.075, 0, 0, 125)
+closePopupBtn.BackgroundColor3 = Color3.fromRGB(160, 25, 25)
+closePopupBtn.Font = Enum.Font.GothamBold
+closePopupBtn.Text = "Got it!"
+closePopupBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closePopupBtn.TextSize = 12
+closePopupBtn.ZIndex = 12
+closePopupBtn.Parent = modalFrame
+Instance.new("UICorner", closePopupBtn).CornerRadius = UDim.new(0, 8)
+
+closePopupBtn.MouseButton1Click:Connect(function()
+	modalOverlay:Destroy()
+end)
+
 -- Tab Switching Logic
 local function switchTab(activeTab)
 	combatContainer.Visible = (activeTab == "Combat")
@@ -439,7 +498,7 @@ toggleGuiBtn.MouseButton1Click:Connect(function()
 end)
 
 -- Dragging Implementation
-local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
+local dragging, dragStart, startPos = false, nil, nil
 titleBar.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = true
@@ -515,7 +574,7 @@ local currentHits = 0
 local currentBreaks = 0
 
 --[================================================================]--
--- Main Processing Loop (0 Delay / Simultaneous Multi-Hit)
+-- Main Processing Loop
 --[================================================================]--
 
 task.spawn(function()
@@ -607,7 +666,7 @@ task.spawn(function()
 				originalCarDetected = false
 			end
 			
-			-- Instant NPC Combat (0 Delay)
+			-- Instant NPC Combat
 			currentHits = 0
 			if isRunning and humanoidRootPart then
 				local npcsFolder = workspace:FindFirstChild("NPCs")
@@ -622,9 +681,10 @@ task.spawn(function()
 								if distance <= ATTACK_RANGE then
 									currentHits = currentHits + 1
 									pcall(function()
-										if remoteEvent then
-											remoteEvent:FireServer("Punches", "ReplicateSound", humanoidRootPart, "Swoosh")
-											remoteEvent:FireServer("NPCs", "Damage", humanoid, DAMAGE_AMOUNT)
+										local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
+										if ev then
+											ev:FireServer("Punches", "ReplicateSound", humanoidRootPart, "Swoosh")
+											ev:FireServer("NPCs", "Damage", humanoid, DAMAGE_AMOUNT)
 										end
 									end)
 								end
@@ -634,7 +694,7 @@ task.spawn(function()
 				end
 			end
 
-			-- Instant Multi-Hit Auto Break (Hits ALL valid objects in range simultaneously with 0 delay)
+			-- Instant Multi-Hit Auto Break
 			currentBreaks = 0
 			if autoBreakRunning and humanoidRootPart then
 				local mapFolder = workspace:FindFirstChild("Map")
@@ -667,8 +727,9 @@ task.spawn(function()
 										if distance <= ATTACK_RANGE then
 											currentBreaks = currentBreaks + 1
 											pcall(function()
-												if remoteEvent then
-													remoteEvent:FireServer("DamageToOpen", "Damage", obj, 6, "melee")
+												local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
+												if ev then
+													ev:FireServer("DamageToOpen", "Damage", obj, 1000, "melee")
 												end
 											end)
 										end
@@ -687,4 +748,4 @@ task.spawn(function()
 	end
 end)
 
-print("JIM HUB (Instant Multi-Hit Update) Loaded Successfully!")
+print("JIM HUB Loaded Successfully!")
