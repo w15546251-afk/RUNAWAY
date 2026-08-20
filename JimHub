@@ -1,0 +1,690 @@
+--[================================================================]--
+-- JIM HUB (Combat, Car Changer, & Settings) - Instant Multi-Hit Update
+--[================================================================]--
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui", 10)
+if not playerGui then return end
+
+-- Find RemoteEvent dynamically with fallback creation if missing
+local remoteEvent = nil
+pcall(function()
+	for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
+		if descendant:IsA("RemoteEvent") then
+			remoteEvent = descendant
+			break
+		end
+	end
+	if not remoteEvent then
+		for _, descendant in ipairs(game:GetDescendants()) do
+			if descendant:IsA("RemoteEvent") and descendant.Name == "Event" then
+				remoteEvent = descendant
+				break
+			end
+		end
+	end
+end)
+
+-- Configuration (Zero Delay / Instant Hit Speed)
+local ATTACK_RANGE = 25
+local ATTACK_COOLDOWN = 0
+local DAMAGE_AMOUNT = 13
+
+local isRunning = false
+local autoBreakRunning = false
+local showVisualizer = false
+local toggledMode = false
+local forceThirdPersonMobile = false 
+local vehicleModActive = false 
+
+-- Store original camera and mouse states
+local originalCameraMode = player.CameraMode
+local originalCameraMinZoom = player.CameraMinZoomDistance
+local originalCameraMaxZoom = player.CameraMaxZoomDistance
+local originalMouseBehavior = UserInputService.MouseBehavior
+local originalMouseIconEnabled = UserInputService.MouseIconEnabled
+
+-- Clear old GUI & Range Ring if script re-runs
+if playerGui:FindFirstChild("JimHubGui") then
+	playerGui.JimHubGui:Destroy()
+end
+if workspace:FindFirstChild("AutoAttackRangeRing") then
+	workspace.AutoAttackRangeRing:Destroy()
+end
+
+-- Create Range Visualizer Part
+local rangeRing = Instance.new("Part")
+rangeRing.Name = "AutoAttackRangeRing"
+rangeRing.Shape = Enum.PartType.Cylinder
+rangeRing.Anchored = true
+rangeRing.CanCollide = false
+rangeRing.Transparency = 1
+rangeRing.BrickColor = BrickColor.new("Bright red")
+rangeRing.Material = Enum.Material.Neon
+rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
+rangeRing.Parent = workspace
+
+--[================================================================]--
+-- Sleek Compact UI Styling (Modern Glass & Crimson Theme)
+--[================================================================]--
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JimHubGui"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+-- Floating Minimize / Toggle Hub Button (Top Right)
+local toggleGuiBtn = Instance.new("TextButton")
+toggleGuiBtn.Name = "ToggleGuiButton"
+toggleGuiBtn.Size = UDim2.new(0, 115, 0, 30)
+toggleGuiBtn.Position = UDim2.new(1, -130, 0, 15)
+toggleGuiBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+toggleGuiBtn.Font = Enum.Font.GothamBold
+toggleGuiBtn.Text = "JIM HUB: ON"
+toggleGuiBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+toggleGuiBtn.TextSize = 11
+toggleGuiBtn.Parent = screenGui
+
+Instance.new("UICorner", toggleGuiBtn).CornerRadius = UDim.new(0, 8)
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Color = Color3.fromRGB(180, 30, 30)
+toggleStroke.Thickness = 1.5
+toggleStroke.Parent = toggleGuiBtn
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 320, 0, 290)
+mainFrame.Position = UDim2.new(0.05, 0, 0.35, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 12)
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(160, 25, 25)
+mainStroke.Thickness = 1.5
+mainStroke.Parent = mainFrame
+
+-- Title Header Bar
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 36)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 12)
+
+local headerCover = Instance.new("Frame")
+headerCover.Size = UDim2.new(1, 0, 0, 6)
+headerCover.Position = UDim2.new(0, 0, 1, -6)
+headerCover.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+headerCover.BorderSizePixel = 0
+headerCover.Parent = titleBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -20, 1, 0)
+titleLabel.Position = UDim2.new(0, 12, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Text = "JIM HUB <font color='#888888'>// V2</font>"
+titleLabel.RichText = true
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextSize = 12
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+-- Tab Switch Buttons (3 Tabs: Combat, Vehicles, Settings)
+local tabHolder = Instance.new("Frame")
+tabHolder.Size = UDim2.new(0.92, 0, 0, 28)
+tabHolder.Position = UDim2.new(0.04, 0, 0, 44)
+tabHolder.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+tabHolder.Parent = mainFrame
+Instance.new("UICorner", tabHolder).CornerRadius = UDim.new(0, 8)
+
+local function createTabBtn(name, posX)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0.32, 0, 1, 0)
+	btn.Position = UDim2.new(posX, 0, 0, 0)
+	btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	btn.Font = Enum.Font.GothamBold
+	btn.Text = name
+	btn.TextColor3 = Color3.fromRGB(160, 160, 160)
+	btn.TextSize = 11
+	btn.Parent = tabHolder
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	return btn
+end
+
+local combatTabBtn = createTabBtn("Combat", 0.01)
+local vehicleTabBtn = createTabBtn("Vehicles", 0.34)
+local settingsTabBtn = createTabBtn("Settings", 0.67)
+
+-- Containers for Tabs
+local combatContainer = Instance.new("Frame")
+combatContainer.Size = UDim2.new(1, 0, 0.72, 0)
+combatContainer.Position = UDim2.new(0, 0, 0, 80)
+combatContainer.BackgroundTransparency = 1
+combatContainer.Visible = true
+combatContainer.Parent = mainFrame
+
+local vehicleContainer = Instance.new("ScrollingFrame")
+vehicleContainer.Size = UDim2.new(1, 0, 0.72, 0)
+vehicleContainer.Position = UDim2.new(0, 0, 0, 80)
+vehicleContainer.BackgroundTransparency = 1
+vehicleContainer.Visible = false
+vehicleContainer.CanvasSize = UDim2.new(0, 0, 0, 260)
+vehicleContainer.ScrollBarThickness = 4
+vehicleContainer.Parent = mainFrame
+
+local settingsContainer = Instance.new("Frame")
+settingsContainer.Size = UDim2.new(1, 0, 0.72, 0)
+settingsContainer.Position = UDim2.new(0, 0, 0, 80)
+settingsContainer.BackgroundTransparency = 1
+settingsContainer.Visible = false
+settingsContainer.Parent = mainFrame
+
+--[ Combat Tab Contents ]--
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0.5, -10, 0, 18)
+statusLabel.Position = UDim2.new(0.04, 0, 0.02, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.Text = "Status: OFF"
+statusLabel.TextColor3 = Color3.fromRGB(220, 80, 80)
+statusLabel.TextSize = 10
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = combatContainer
+
+local targetLabel = Instance.new("TextLabel")
+targetLabel.Size = UDim2.new(0.5, -10, 0, 18)
+targetLabel.Position = UDim2.new(0.5, 0, 0.02, 0)
+targetLabel.BackgroundTransparency = 1
+targetLabel.Font = Enum.Font.GothamMedium
+targetLabel.Text = "Hits: 0 | Breaks: 0"
+targetLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+targetLabel.TextSize = 10
+targetLabel.TextXAlignment = Enum.TextXAlignment.Right
+targetLabel.Parent = combatContainer
+
+local rangeLabel = Instance.new("TextLabel")
+rangeLabel.Size = UDim2.new(0.3, 0, 0, 32)
+rangeLabel.Position = UDim2.new(0.04, 0, 0.18, 0)
+rangeLabel.BackgroundTransparency = 1
+rangeLabel.Font = Enum.Font.GothamBold
+rangeLabel.Text = "Range:"
+rangeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+rangeLabel.TextSize = 11
+rangeLabel.TextXAlignment = Enum.TextXAlignment.Left
+rangeLabel.Parent = combatContainer
+
+local rangeTextBox = Instance.new("TextBox")
+rangeTextBox.Size = UDim2.new(0.25, 0, 0, 32)
+rangeTextBox.Position = UDim2.new(0.32, 0, 0.18, 0)
+rangeTextBox.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+rangeTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+rangeTextBox.Font = Enum.Font.GothamBold
+rangeTextBox.Text = tostring(ATTACK_RANGE)
+rangeTextBox.TextSize = 12
+rangeTextBox.ClearTextOnFocus = false
+rangeTextBox.Parent = combatContainer
+Instance.new("UICorner", rangeTextBox).CornerRadius = UDim.new(0, 6)
+
+local visButton = Instance.new("TextButton")
+visButton.Size = UDim2.new(0.35, 0, 0, 32)
+visButton.Position = UDim2.new(0.61, 0, 0.18, 0)
+visButton.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+visButton.Font = Enum.Font.GothamBold
+visButton.Text = "Ring: OFF"
+visButton.TextColor3 = Color3.fromRGB(180, 180, 180)
+visButton.TextSize = 11
+visButton.Parent = combatContainer
+Instance.new("UICorner", visButton).CornerRadius = UDim.new(0, 6)
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.92, 0, 0, 38)
+toggleButton.Position = UDim2.new(0.04, 0, 0.42, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Text = "Auto Attack: OFF"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextSize = 11
+toggleButton.Parent = combatContainer
+Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 6)
+
+local autoBreakToggleBtn = Instance.new("TextButton")
+autoBreakToggleBtn.Size = UDim2.new(0.92, 0, 0, 38)
+autoBreakToggleBtn.Position = UDim2.new(0.04, 0, 0.68, 0)
+autoBreakToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+autoBreakToggleBtn.Font = Enum.Font.GothamBold
+autoBreakToggleBtn.Text = "Auto Break Multi-Hit: OFF"
+autoBreakToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoBreakToggleBtn.TextSize = 11
+autoBreakToggleBtn.Parent = combatContainer
+Instance.new("UICorner", autoBreakToggleBtn).CornerRadius = UDim.new(0, 6)
+
+--[ Vehicle Tab Contents ]--
+local vehicleStatus = Instance.new("TextLabel")
+vehicleStatus.Size = UDim2.new(1, -20, 0, 22)
+vehicleStatus.Position = UDim2.new(0, 10, 0, 2)
+vehicleStatus.BackgroundTransparency = 1
+vehicleStatus.Font = Enum.Font.GothamBold
+vehicleStatus.Text = "Target Vehicle: Searching..."
+vehicleStatus.TextColor3 = Color3.fromRGB(255, 180, 50)
+vehicleStatus.TextSize = 11
+vehicleStatus.TextXAlignment = Enum.TextXAlignment.Left
+vehicleStatus.Parent = vehicleContainer
+
+local vehicleToggleBtn = Instance.new("TextButton")
+vehicleToggleBtn.Size = UDim2.new(0.92, 0, 0, 32)
+vehicleToggleBtn.Position = UDim2.new(0.04, 0, 0, 28)
+vehicleToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+vehicleToggleBtn.Font = Enum.Font.GothamBold
+vehicleToggleBtn.Text = "Vehicle Mods: OFF"
+vehicleToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+vehicleToggleBtn.TextSize = 11
+vehicleToggleBtn.Parent = vehicleContainer
+Instance.new("UICorner", vehicleToggleBtn).CornerRadius = UDim.new(0, 6)
+
+vehicleToggleBtn.MouseButton1Click:Connect(function()
+	vehicleModActive = not vehicleModActive
+	if vehicleModActive then
+		vehicleToggleBtn.Text = "Vehicle Mods: ON"
+		vehicleToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 35)
+	else
+		vehicleToggleBtn.Text = "Vehicle Mods: OFF"
+		vehicleToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+	end
+end)
+
+local gasLbl = Instance.new("TextLabel")
+gasLbl.Size = UDim2.new(0.5, 0, 0, 24)
+gasLbl.Position = UDim2.new(0.04, 0, 0, 68)
+gasLbl.BackgroundTransparency = 1
+gasLbl.Font = Enum.Font.GothamBold
+gasLbl.Text = "gasLevel:"
+gasLbl.TextColor3 = Color3.fromRGB(80, 220, 80)
+gasLbl.TextSize = 11
+gasLbl.TextXAlignment = Enum.TextXAlignment.Left
+gasLbl.Parent = vehicleContainer
+
+local gasTextBox = Instance.new("TextBox")
+gasTextBox.Size = UDim2.new(0.38, 0, 0, 24)
+gasTextBox.Position = UDim2.new(0.58, 0, 0, 68)
+gasTextBox.BackgroundColor3 = Color3.fromRGB(20, 35, 20)
+gasTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+gasTextBox.Font = Enum.Font.GothamBold
+gasTextBox.Text = "100"
+gasTextBox.TextSize = 11
+gasTextBox.ClearTextOnFocus = false
+gasTextBox.Parent = vehicleContainer
+Instance.new("UICorner", gasTextBox).CornerRadius = UDim.new(0, 6)
+
+local defaultVehicleProperties = {
+	["Acceleration"] = 95,
+	["BrakingPower"] = 32000,
+	["Downforce"] = 1500,
+	["Mass"] = 1500,
+	["Suspension Stiffness"] = 300,
+	["TopSpeedMPH"] = 300,
+	["Torque"] = 30000,
+}
+
+local originalVehicleProperties = {}
+local yOffset = 100
+local propertyBoxes = {}
+
+for propName, defaultVal in pairs(defaultVehicleProperties) do
+	originalVehicleProperties[propName] = defaultVal
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(0.5, 0, 0, 24)
+	lbl.Position = UDim2.new(0.04, 0, 0, yOffset)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.Gotham
+	lbl.Text = propName .. ":"
+	lbl.TextColor3 = Color3.fromRGB(180, 180, 180)
+	lbl.TextSize = 11
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = vehicleContainer
+
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.new(0.38, 0, 0, 24)
+	box.Position = UDim2.new(0.58, 0, 0, yOffset)
+	box.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+	box.TextColor3 = Color3.fromRGB(255, 255, 255)
+	box.Font = Enum.Font.GothamBold
+	box.Text = tostring(defaultVal)
+	box.TextSize = 11
+	box.ClearTextOnFocus = false
+	box.Parent = vehicleContainer
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+
+	propertyBoxes[propName] = box
+	yOffset = yOffset + 30
+end
+vehicleContainer.CanvasSize = UDim2.new(0, 0, 0, yOffset + 15)
+
+--[ Settings Tab Contents ]--
+local mobileTPLabel = Instance.new("TextLabel")
+mobileTPLabel.Size = UDim2.new(0.65, 0, 0, 36)
+mobileTPLabel.Position = UDim2.new(0.04, 0, 0.08, 0)
+mobileTPLabel.BackgroundTransparency = 1
+mobileTPLabel.Font = Enum.Font.GothamBold
+mobileTPLabel.Text = "Force 3rd Person (Mobile):"
+mobileTPLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+mobileTPLabel.TextSize = 11
+mobileTPLabel.TextXAlignment = Enum.TextXAlignment.Left
+mobileTPLabel.Parent = settingsContainer
+
+local mobileTPBtn = Instance.new("TextButton")
+mobileTPBtn.Size = UDim2.new(0.24, 0, 0, 36)
+mobileTPBtn.Position = UDim2.new(0.72, 0, 0.08, 0)
+mobileTPBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+mobileTPBtn.Font = Enum.Font.GothamBold
+mobileTPBtn.Text = "OFF"
+mobileTPBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+mobileTPBtn.TextSize = 11
+mobileTPBtn.Parent = settingsContainer
+Instance.new("UICorner", mobileTPBtn).CornerRadius = UDim.new(0, 6)
+
+mobileTPBtn.MouseButton1Click:Connect(function()
+	forceThirdPersonMobile = not forceThirdPersonMobile
+	if forceThirdPersonMobile then
+		mobileTPBtn.Text = "ON"
+		mobileTPBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 35)
+	else
+		mobileTPBtn.Text = "OFF"
+		mobileTPBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
+		player.CameraMode = originalCameraMode
+		player.CameraMinZoomDistance = originalCameraMinZoom
+		player.CameraMaxZoomDistance = originalCameraMaxZoom
+	end
+end)
+
+-- Tab Switching Logic
+local function switchTab(activeTab)
+	combatContainer.Visible = (activeTab == "Combat")
+	vehicleContainer.Visible = (activeTab == "Vehicle")
+	settingsContainer.Visible = (activeTab == "Settings")
+
+	combatTabBtn.BackgroundColor3 = (activeTab == "Combat") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
+	combatTabBtn.TextColor3 = (activeTab == "Combat") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
+
+	vehicleTabBtn.BackgroundColor3 = (activeTab == "Vehicle") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
+	vehicleTabBtn.TextColor3 = (activeTab == "Vehicle") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
+
+	settingsTabBtn.BackgroundColor3 = (activeTab == "Settings") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
+	settingsTabBtn.TextColor3 = (activeTab == "Settings") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
+end
+
+combatTabBtn.MouseButton1Click:Connect(function() switchTab("Combat") end)
+vehicleTabBtn.MouseButton1Click:Connect(function() switchTab("Vehicle") end)
+settingsTabBtn.MouseButton1Click:Connect(function() switchTab("Settings") end)
+
+-- UI Toggle / Minimize Functionality
+local hubVisible = true
+toggleGuiBtn.MouseButton1Click:Connect(function()
+	hubVisible = not hubVisible
+	mainFrame.Visible = hubVisible
+	toggleGuiBtn.Text = hubVisible and "JIM HUB: ON" or "JIM HUB: OFF"
+	toggleGuiBtn.TextColor3 = hubVisible and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(140, 140, 140)
+	toggleStroke.Color = hubVisible and Color3.fromRGB(180, 30, 30) or Color3.fromRGB(70, 70, 70)
+end)
+
+-- Dragging Implementation
+local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
+titleBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainFrame.Position
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+
+rangeTextBox.FocusLost:Connect(function()
+	local newRange = tonumber(rangeTextBox.Text)
+	if newRange and newRange > 0 then ATTACK_RANGE = newRange end
+	rangeTextBox.Text = tostring(ATTACK_RANGE)
+end)
+
+visButton.MouseButton1Click:Connect(function()
+	showVisualizer = not showVisualizer
+	visButton.Text = showVisualizer and "Ring: ON" or "Ring: OFF"
+	visButton.TextColor3 = showVisualizer and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 180, 180)
+	visButton.BackgroundColor3 = showVisualizer and Color3.fromRGB(90, 20, 20) or Color3.fromRGB(25, 25, 25)
+end)
+
+toggleButton.MouseButton1Click:Connect(function()
+	isRunning = not isRunning
+	statusLabel.Text = isRunning and "Status: ON" or "Status: OFF"
+	statusLabel.TextColor3 = isRunning and Color3.fromRGB(80, 255, 80) or Color3.fromRGB(220, 80, 80)
+	toggleButton.Text = isRunning and "Auto Attack: ON" or "Auto Attack: OFF"
+	toggleButton.BackgroundColor3 = isRunning and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
+	if not isRunning then targetLabel.Text = "Hits: 0 | Breaks: 0" end
+end)
+
+autoBreakToggleBtn.MouseButton1Click:Connect(function()
+	autoBreakRunning = not autoBreakRunning
+	autoBreakToggleBtn.Text = autoBreakRunning and "Auto Break Multi-Hit: ON" or "Auto Break Multi-Hit: OFF"
+	autoBreakToggleBtn.BackgroundColor3 = autoBreakRunning and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
+	if not autoBreakRunning then targetLabel.Text = "Hits: 0 | Breaks: 0" end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.G then
+		toggledMode = not toggledMode
+		if toggledMode then
+			player.CameraMode = Enum.CameraMode.Classic
+			player.CameraMinZoomDistance = 10
+			player.CameraMaxZoomDistance = 400
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		else
+			if not forceThirdPersonMobile then
+				player.CameraMode = originalCameraMode
+				player.CameraMinZoomDistance = originalCameraMinZoom
+				player.CameraMaxZoomDistance = originalCameraMaxZoom
+			end
+			UserInputService.MouseBehavior = originalMouseBehavior
+			UserInputService.MouseIconEnabled = originalMouseIconEnabled
+		end
+	end
+end)
+
+local originalCarDetected = false
+local currentHits = 0
+local currentBreaks = 0
+
+--[================================================================]--
+-- Main Processing Loop (0 Delay / Simultaneous Multi-Hit)
+--[================================================================]--
+
+task.spawn(function()
+	while true do
+		local character = player.Character
+		if character then
+			local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+			
+			if forceThirdPersonMobile then
+				player.CameraMode = Enum.CameraMode.Classic
+				if player.CameraMinZoomDistance < 10 then player.CameraMinZoomDistance = 10 end
+				if player.CameraMaxZoomDistance < 400 then player.CameraMaxZoomDistance = 400 end
+			end
+			
+			if toggledMode and player.CameraMinZoomDistance < 10 then
+				player.CameraMinZoomDistance = 10
+			end
+			
+			if humanoidRootPart and showVisualizer then
+				rangeRing.Transparency = 0.7
+				rangeRing.CFrame = CFrame.new(humanoidRootPart.Position - Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.rad(90))
+				rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
+			else
+				rangeRing.Transparency = 1
+			end
+			
+			-- Vehicle Tracker Loop
+			local vehiclesFolder = workspace:FindFirstChild("Vehicles")
+			if vehiclesFolder then
+				local targetVehicle = vehiclesFolder:FindFirstChild("Claptima")
+				if not targetVehicle then
+					local children = vehiclesFolder:GetChildren()
+					if #children > 0 then targetVehicle = children[1] end
+				end
+				
+				if targetVehicle then
+					vehicleStatus.Text = "Target: " .. targetVehicle.Name
+					local propFolder = targetVehicle:FindFirstChild("VehicleProperty")
+					
+					if not originalCarDetected then
+						for propName, box in pairs(propertyBoxes) do
+							local nativeVal = nil
+							pcall(function()
+								if propFolder then nativeVal = propFolder:GetAttribute(propName) or propFolder[propName] end
+								if not nativeVal then nativeVal = targetVehicle:GetAttribute(propName) or targetVehicle[propName] end
+							end)
+							if nativeVal then
+								originalVehicleProperties[propName] = nativeVal
+								box.Text = tostring(nativeVal)
+							end
+						end
+						originalCarDetected = true
+					end
+					
+					for propName, box in pairs(propertyBoxes) do
+						local appliedVal = nil
+						if vehicleModActive then
+							appliedVal = tonumber(box.Text)
+						else
+							appliedVal = originalVehicleProperties[propName]
+							if not box.IsFocused and appliedVal then box.Text = tostring(appliedVal) end
+						end
+						
+						if appliedVal then
+							pcall(function()
+								if propFolder then
+									propFolder:SetAttribute(propName, appliedVal)
+									propFolder[propName] = appliedVal
+								end
+								targetVehicle:SetAttribute(propName, appliedVal)
+								targetVehicle[propName] = appliedVal
+							end)
+						end
+					end
+					
+					if vehicleModActive then
+						local targetGasVal = tonumber(gasTextBox.Text)
+						if targetGasVal then
+							local gasObj = targetVehicle:FindFirstChild("gasLevel")
+							if gasObj then pcall(function() gasObj.Value = targetGasVal end) end
+						end
+					end
+				else
+					vehicleStatus.Text = "Target Vehicle: None found"
+					originalCarDetected = false
+				end
+			else
+				vehicleStatus.Text = "Target Vehicle: workspace.Vehicles missing!"
+				originalCarDetected = false
+			end
+			
+			-- Instant NPC Combat (0 Delay)
+			currentHits = 0
+			if isRunning and humanoidRootPart then
+				local npcsFolder = workspace:FindFirstChild("NPCs")
+				if npcsFolder then
+					for _, npcModel in ipairs(npcsFolder:GetChildren()) do
+						if npcModel:IsA("Model") then
+							local humanoid = npcModel:FindFirstChildOfClass("Humanoid")
+							local rootPart = npcModel:FindFirstChild("HumanoidRootPart") or npcModel:FindFirstChild("RootPart") or npcModel:FindFirstChild("Head")
+							
+							if humanoid and rootPart and humanoid.Health > 0 then
+								local distance = (rootPart.Position - humanoidRootPart.Position).Magnitude
+								if distance <= ATTACK_RANGE then
+									currentHits = currentHits + 1
+									pcall(function()
+										if remoteEvent then
+											remoteEvent:FireServer("Punches", "ReplicateSound", humanoidRootPart, "Swoosh")
+											remoteEvent:FireServer("NPCs", "Damage", humanoid, DAMAGE_AMOUNT)
+										end
+									end)
+								end
+							end
+						end
+					end
+				end
+			end
+
+			-- Instant Multi-Hit Auto Break (Hits ALL valid objects in range simultaneously with 0 delay)
+			currentBreaks = 0
+			if autoBreakRunning and humanoidRootPart then
+				local mapFolder = workspace:FindFirstChild("Map")
+				if mapFolder then
+					local buildingsFolder = mapFolder:FindFirstChild("Buildings")
+					if buildingsFolder then
+						local validTargetNames = { ["ATM"] = true, ["CashRegister"] = true, ["Vault"] = true, ["Safe"] = true }
+						
+						for _, obj in ipairs(buildingsFolder:GetDescendants()) do
+							if obj:IsA("Model") and validTargetNames[obj.Name] then
+								local targetPart = obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("RootPart") or obj:FindFirstChild("Head") or obj:FindFirstChildWhichIsA("BasePart")
+								
+								if targetPart then
+									local health = 100
+									local humanoid = obj:FindFirstChildOfClass("Humanoid")
+									if humanoid then
+										health = humanoid.Health
+									else
+										local healthVal = obj:FindFirstChild("Health") or obj:FindFirstChild("HP")
+										if healthVal then
+											pcall(function() health = healthVal.Value end)
+										else
+											local attrHealth = obj:GetAttribute("Health") or obj:GetAttribute("HP")
+											if attrHealth then health = attrHealth end
+										end
+									end
+									
+									if health > 0 then
+										local distance = (targetPart.Position - humanoidRootPart.Position).Magnitude
+										if distance <= ATTACK_RANGE then
+											currentBreaks = currentBreaks + 1
+											pcall(function()
+												if remoteEvent then
+													remoteEvent:FireServer("DamageToOpen", "Damage", obj, 6, "melee")
+												end
+											end)
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+
+			targetLabel.Text = string.format("Hits: %d | Breaks: %d", currentHits, currentBreaks)
+		end
+		
+		RunService.Heartbeat:Wait()
+	end
+end)
+
+print("JIM HUB (Instant Multi-Hit Update) Loaded Successfully!")
