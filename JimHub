@@ -1,1144 +1,849 @@
---[================================================================]--
--- JIM HUB (Combat, Vehicles, Auto Loot, Speed, Inf Jump, & Settings)
---[================================================================]--
-
+-- Services
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui", 10)
-if not playerGui then return end
-
--- Safe Remote Function & Remote Event Retrieval
-local remoteFunction = nil
-local remoteEvent = nil
-
-task.spawn(function()
-	pcall(function()
-		remoteFunction = ReplicatedStorage:WaitForChild("Function", 5)
-		remoteEvent = ReplicatedStorage:WaitForChild("Event", 5)
-	end)
-	if not remoteFunction then
-		for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
-			if descendant:IsA("RemoteFunction") then
-				remoteFunction = descendant
-				break
-			end
-		end
-	end
-	if not remoteEvent then
-		for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
-			if descendant:IsA("RemoteEvent") then
-				remoteEvent = descendant
-				break
-			end
-		end
-	end
-end)
+local LocalPlayer = Players.LocalPlayer
 
 -- Configuration
-local ATTACK_RANGE = 25
-local DAMAGE_AMOUNT = 1000
-
-local isRunning = false
-local autoBreakRunning = false
-local showVisualizer = false
-local toggledMode = false
-local forceThirdPersonMobile = false 
-local vehicleModActive = false 
-local autoLootActive = false
-local lootAllMode = true
-
--- New Features States (CFrame Speed, Inf Jump, Noclip)
-local speedModActive = false
-local customCFrameSpeed = 24
-local customJumpPower = 50
-local noclipActive = false
-local infJumpActive = false
-
--- Store original camera, mouse, and character movement states
-local originalCameraMode = player.CameraMode
-local originalCameraMinZoom = player.CameraMinZoomDistance
-local originalCameraMaxZoom = player.CameraMaxZoomDistance
-local originalMouseBehavior = UserInputService.MouseBehavior
-local originalMouseIconEnabled = UserInputService.MouseIconEnabled
-
--- Clear old GUI & Range Ring if script re-runs
-if playerGui:FindFirstChild("JimHubGui") then
-	playerGui.JimHubGui:Destroy()
-end
-if workspace:FindFirstChild("AutoAttackRangeRing") then
-	workspace.AutoAttackRangeRing:Destroy()
-end
-
--- Create Range Visualizer Part
-local rangeRing = Instance.new("Part")
-rangeRing.Name = "AutoAttackRangeRing"
-rangeRing.Shape = Enum.PartType.Cylinder
-rangeRing.Anchored = true
-rangeRing.CanCollide = false
-rangeRing.Transparency = 1
-rangeRing.BrickColor = BrickColor.new("Bright red")
-rangeRing.Material = Enum.Material.Neon
-rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
-rangeRing.Parent = workspace
-
---[================================================================]--
--- Sleek Compact UI Styling (Modern Glass & Crimson Theme)
---[================================================================]--
-
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "JimHubGui"
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.Parent = playerGui
-
--- Floating Minimize / Toggle Hub Button (Top Right)
-local toggleGuiBtn = Instance.new("TextButton")
-toggleGuiBtn.Name = "ToggleGuiButton"
-toggleGuiBtn.Size = UDim2.new(0, 115, 0, 30)
-toggleGuiBtn.Position = UDim2.new(1, -130, 0, 15)
-toggleGuiBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-toggleGuiBtn.Font = Enum.Font.GothamBold
-toggleGuiBtn.Text = "JIM HUB: ON"
-toggleGuiBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
-toggleGuiBtn.TextSize = 11
-toggleGuiBtn.Parent = screenGui
-
-Instance.new("UICorner", toggleGuiBtn).CornerRadius = UDim.new(0, 8)
-local toggleStroke = Instance.new("UIStroke")
-toggleStroke.Color = Color3.fromRGB(180, 30, 30)
-toggleStroke.Thickness = 1.5
-toggleStroke.Parent = toggleGuiBtn
-
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 320, 0, 315)
-mainFrame.Position = UDim2.new(0.05, 0, 0.32, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Parent = screenGui
-
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 12)
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.fromRGB(160, 25, 25)
-mainStroke.Thickness = 1.5
-mainStroke.Parent = mainFrame
-
--- Title Header Bar
-local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 36)
-titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-titleBar.BorderSizePixel = 0
-titleBar.Parent = mainFrame
-Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 12)
-
-local headerCover = Instance.new("Frame")
-headerCover.Size = UDim2.new(1, 0, 0, 6)
-headerCover.Position = UDim2.new(0, 0, 1, -6)
-headerCover.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-headerCover.BorderSizePixel = 0
-headerCover.Parent = titleBar
-
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -20, 1, 0)
-titleLabel.Position = UDim2.new(0, 12, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.Text = "JIM HUB <font color='#888888'>// V2.5</font>"
-titleLabel.RichText = true
-titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-titleLabel.TextSize = 12
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = titleBar
-
--- Tab Switch Buttons
-local tabHolder = Instance.new("Frame")
-tabHolder.Size = UDim2.new(0.92, 0, 0, 28)
-tabHolder.Position = UDim2.new(0.04, 0, 0, 44)
-tabHolder.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-tabHolder.Parent = mainFrame
-Instance.new("UICorner", tabHolder).CornerRadius = UDim.new(0, 8)
-
-local function createTabBtn(name, posX, sizeX)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(sizeX or 0.23, 0, 1, 0)
-	btn.Position = UDim2.new(posX, 0, 0, 0)
-	btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	btn.Font = Enum.Font.GothamBold
-	btn.Text = name
-	btn.TextColor3 = Color3.fromRGB(160, 160, 160)
-	btn.TextSize = 10
-	btn.Parent = tabHolder
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-	return btn
-end
-
-local combatTabBtn = createTabBtn("Combat", 0.01, 0.23)
-local vehicleTabBtn = createTabBtn("Vehicles", 0.25, 0.23)
-local lootTabBtn = createTabBtn("Auto Loot", 0.49, 0.25)
-local settingsTabBtn = createTabBtn("Settings", 0.75, 0.23)
-
--- Containers for Tabs
-local combatContainer = Instance.new("Frame")
-combatContainer.Size = UDim2.new(1, 0, 0.72, 0)
-combatContainer.Position = UDim2.new(0, 0, 0, 80)
-combatContainer.BackgroundTransparency = 1
-combatContainer.Visible = true
-combatContainer.Parent = mainFrame
-
-local vehicleContainer = Instance.new("ScrollingFrame")
-vehicleContainer.Size = UDim2.new(1, 0, 0.72, 0)
-vehicleContainer.Position = UDim2.new(0, 0, 0, 80)
-vehicleContainer.BackgroundTransparency = 1
-vehicleContainer.Visible = false
-vehicleContainer.CanvasSize = UDim2.new(0, 0, 0, 260)
-vehicleContainer.ScrollBarThickness = 4
-vehicleContainer.Parent = mainFrame
-
-local lootContainer = Instance.new("Frame")
-lootContainer.Size = UDim2.new(1, 0, 0.72, 0)
-lootContainer.Position = UDim2.new(0, 0, 0, 80)
-lootContainer.BackgroundTransparency = 1
-lootContainer.Visible = false
-lootContainer.Parent = mainFrame
-
-local settingsContainer = Instance.new("ScrollingFrame")
-settingsContainer.Size = UDim2.new(1, 0, 0.72, 0)
-settingsContainer.Position = UDim2.new(0, 0, 0, 80)
-settingsContainer.BackgroundTransparency = 1
-settingsContainer.Visible = false
-settingsContainer.CanvasSize = UDim2.new(0, 0, 0, 255)
-settingsContainer.ScrollBarThickness = 4
-settingsContainer.Parent = mainFrame
-
---[ Combat Tab Contents ]--
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(0.5, -10, 0, 18)
-statusLabel.Position = UDim2.new(0.04, 0, 0.02, 0)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.Text = "Status: OFF"
-statusLabel.TextColor3 = Color3.fromRGB(220, 80, 80)
-statusLabel.TextSize = 10
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.Parent = combatContainer
-
-local targetLabel = Instance.new("TextLabel")
-targetLabel.Size = UDim2.new(0.5, -10, 0, 18)
-targetLabel.Position = UDim2.new(0.5, 0, 0.02, 0)
-targetLabel.BackgroundTransparency = 1
-targetLabel.Font = Enum.Font.GothamMedium
-targetLabel.Text = "Hits: 0 | Breaks: 0"
-targetLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
-targetLabel.TextSize = 10
-targetLabel.TextXAlignment = Enum.TextXAlignment.Right
-targetLabel.Parent = combatContainer
-
-local rangeLabel = Instance.new("TextLabel")
-rangeLabel.Size = UDim2.new(0.3, 0, 0, 32)
-rangeLabel.Position = UDim2.new(0.04, 0, 0.18, 0)
-rangeLabel.BackgroundTransparency = 1
-rangeLabel.Font = Enum.Font.GothamBold
-rangeLabel.Text = "Range:"
-rangeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-rangeLabel.TextSize = 11
-rangeLabel.TextXAlignment = Enum.TextXAlignment.Left
-rangeLabel.Parent = combatContainer
-
-local rangeTextBox = Instance.new("TextBox")
-rangeTextBox.Size = UDim2.new(0.25, 0, 0, 32)
-rangeTextBox.Position = UDim2.new(0.32, 0, 0.18, 0)
-rangeTextBox.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-rangeTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-rangeTextBox.Font = Enum.Font.GothamBold
-rangeTextBox.Text = tostring(ATTACK_RANGE)
-rangeTextBox.TextSize = 12
-rangeTextBox.ClearTextOnFocus = false
-rangeTextBox.Parent = combatContainer
-Instance.new("UICorner", rangeTextBox).CornerRadius = UDim.new(0, 6)
-
-local visButton = Instance.new("TextButton")
-visButton.Size = UDim2.new(0.35, 0, 0, 32)
-visButton.Position = UDim2.new(0.61, 0, 0.18, 0)
-visButton.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-visButton.Font = Enum.Font.GothamBold
-visButton.Text = "Ring: OFF"
-visButton.TextColor3 = Color3.fromRGB(180, 180, 180)
-visButton.TextSize = 11
-visButton.Parent = combatContainer
-Instance.new("UICorner", visButton).CornerRadius = UDim.new(0, 6)
-
-local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.new(0.92, 0, 0, 38)
-toggleButton.Position = UDim2.new(0.04, 0, 0.42, 0)
-toggleButton.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-toggleButton.Font = Enum.Font.GothamBold
-toggleButton.Text = "Auto Attack: OFF"
-toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.TextSize = 11
-toggleButton.Parent = combatContainer
-Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 6)
-
-local autoBreakToggleBtn = Instance.new("TextButton")
-autoBreakToggleBtn.Size = UDim2.new(0.92, 0, 0, 38)
-autoBreakToggleBtn.Position = UDim2.new(0.04, 0, 0.68, 0)
-autoBreakToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-autoBreakToggleBtn.Font = Enum.Font.GothamBold
-autoBreakToggleBtn.Text = "Auto Break Multi-Hit: OFF"
-autoBreakToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-autoBreakToggleBtn.TextSize = 11
-autoBreakToggleBtn.Parent = combatContainer
-Instance.new("UICorner", autoBreakToggleBtn).CornerRadius = UDim.new(0, 6)
-
---[ Vehicle Tab Contents ]--
-local vehicleStatus = Instance.new("TextLabel")
-vehicleStatus.Size = UDim2.new(1, -20, 0, 22)
-vehicleStatus.Position = UDim2.new(0, 10, 0, 2)
-vehicleStatus.BackgroundTransparency = 1
-vehicleStatus.Font = Enum.Font.GothamBold
-vehicleStatus.Text = "Target Vehicle: Searching..."
-vehicleStatus.TextColor3 = Color3.fromRGB(255, 180, 50)
-vehicleStatus.TextSize = 11
-vehicleStatus.TextXAlignment = Enum.TextXAlignment.Left
-vehicleStatus.Parent = vehicleContainer
-
-local vehicleToggleBtn = Instance.new("TextButton")
-vehicleToggleBtn.Size = UDim2.new(0.92, 0, 0, 32)
-vehicleToggleBtn.Position = UDim2.new(0.04, 0, 0, 28)
-vehicleToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-vehicleToggleBtn.Font = Enum.Font.GothamBold
-vehicleToggleBtn.Text = "Vehicle Mods: OFF"
-vehicleToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-vehicleToggleBtn.TextSize = 11
-vehicleToggleBtn.Parent = vehicleContainer
-Instance.new("UICorner", vehicleToggleBtn).CornerRadius = UDim.new(0, 6)
-
-vehicleToggleBtn.MouseButton1Click:Connect(function()
-	vehicleModActive = not vehicleModActive
-	if vehicleModActive then
-		vehicleToggleBtn.Text = "Vehicle Mods: ON"
-		vehicleToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 35)
-	else
-		vehicleToggleBtn.Text = "Vehicle Mods: OFF"
-		vehicleToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-	end
-end)
-
-local gasLbl = Instance.new("TextLabel")
-gasLbl.Size = UDim2.new(0.5, 0, 0, 24)
-gasLbl.Position = UDim2.new(0.04, 0, 0, 68)
-gasLbl.BackgroundTransparency = 1
-gasLbl.Font = Enum.Font.GothamBold
-gasLbl.Text = "gasLevel:"
-gasLbl.TextColor3 = Color3.fromRGB(80, 220, 80)
-gasLbl.TextSize = 11
-gasLbl.TextXAlignment = Enum.TextXAlignment.Left
-gasLbl.Parent = vehicleContainer
-
-local gasTextBox = Instance.new("TextBox")
-gasTextBox.Size = UDim2.new(0.38, 0, 0, 24)
-gasTextBox.Position = UDim2.new(0.58, 0, 0, 68)
-gasTextBox.BackgroundColor3 = Color3.fromRGB(20, 35, 20)
-gasTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-gasTextBox.Font = Enum.Font.GothamBold
-gasTextBox.Text = "100"
-gasTextBox.TextSize = 11
-gasTextBox.ClearTextOnFocus = false
-gasTextBox.Parent = vehicleContainer
-Instance.new("UICorner", gasTextBox).CornerRadius = UDim.new(0, 6)
-
-local defaultVehicleProperties = {
-	["Acceleration"] = 95,
-	["BrakingPower"] = 32000,
-	["Downforce"] = 1500,
-	["Mass"] = 1500,
-	["Suspension Stiffness"] = 300,
-	["TopSpeedMPH"] = 300,
-	["Torque"] = 30000,
+local Config = {
+    Delay = 0.8,                        -- Transition delay to next money drop
+    MaxAttempts = 2,                    -- Attempts before teleporting to the money drop
+    TeleportWait = 4.0,                 -- Slower 4-second interval between teleports
+    TeleportDistanceThreshold = 5,      -- Only teleport if the drop is 5 studs away or more
+    CashierMoneyDropsToCollect = 6,     -- Number of money drops to collect per cashier before moving
+    NotificationDuration = 3,
+    RemovalRadius = 5                   -- Map objects within 5 studs around you are removed and return when you walk > 5 studs away
 }
 
-local originalVehicleProperties = {}
-local yOffset = 100
-local propertyBoxes = {}
+-- State Variables
+local isAutoFarmRunning = false
+local isCashierFarmRunning = false
+local visitedDrops = {}
+local lastTeleportTick = 0
 
-for propName, defaultVal in pairs(defaultVehicleProperties) do
-	originalVehicleProperties[propName] = defaultVal
-
-	local lbl = Instance.new("TextLabel")
-	lbl.Size = UDim2.new(0.5, 0, 0, 24)
-	lbl.Position = UDim2.new(0.04, 0, 0, yOffset)
-	lbl.BackgroundTransparency = 1
-	lbl.Font = Enum.Font.Gotham
-	lbl.Text = propName .. ":"
-	lbl.TextColor3 = Color3.fromRGB(180, 180, 180)
-	lbl.TextSize = 11
-	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.Parent = vehicleContainer
-
-	local box = Instance.new("TextBox")
-	box.Size = UDim2.new(0.38, 0, 0, 24)
-	box.Position = UDim2.new(0.58, 0, 0, yOffset)
-	box.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-	box.TextColor3 = Color3.fromRGB(255, 255, 255)
-	box.Font = Enum.Font.GothamBold
-	box.Text = tostring(defaultVal)
-	box.TextSize = 11
-	box.ClearTextOnFocus = false
-	box.Parent = vehicleContainer
-	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
-
-	propertyBoxes[propName] = box
-	yOffset = yOffset + 30
-end
-vehicleContainer.CanvasSize = UDim2.new(0, 0, 0, yOffset + 15)
-
---[ Auto Loot Tab Contents ]--
-local lootToggleBtn = Instance.new("TextButton")
-lootToggleBtn.Size = UDim2.new(0.92, 0, 0, 26)
-lootToggleBtn.Position = UDim2.new(0.04, 0, 0.01, 0)
-lootToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-lootToggleBtn.Font = Enum.Font.GothamBold
-lootToggleBtn.Text = "Auto Loot: OFF"
-lootToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-lootToggleBtn.TextSize = 10
-lootToggleBtn.Parent = lootContainer
-Instance.new("UICorner", lootToggleBtn).CornerRadius = UDim.new(0, 6)
-
-local dropSelectedBtn = Instance.new("TextButton")
-dropSelectedBtn.Size = UDim2.new(0.44, 0, 0, 26)
-dropSelectedBtn.Position = UDim2.new(0.04, 0, 0.17, 0)
-dropSelectedBtn.BackgroundColor3 = Color3.fromRGB(140, 75, 25)
-dropSelectedBtn.Font = Enum.Font.GothamBold
-dropSelectedBtn.Text = "Drop Selected"
-dropSelectedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-dropSelectedBtn.TextSize = 10
-dropSelectedBtn.Parent = lootContainer
-Instance.new("UICorner", dropSelectedBtn).CornerRadius = UDim.new(0, 6)
-
-local dropAllBtn = Instance.new("TextButton")
-dropAllBtn.Size = UDim2.new(0.44, 0, 0, 26)
-dropAllBtn.Position = UDim2.new(0.52, 0, 0.17, 0)
-dropAllBtn.BackgroundColor3 = Color3.fromRGB(180, 45, 45)
-dropAllBtn.Font = Enum.Font.GothamBold
-dropAllBtn.Text = "Drop All Items"
-dropAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-dropAllBtn.TextSize = 10
-dropAllBtn.Parent = lootContainer
-Instance.new("UICorner", dropAllBtn).CornerRadius = UDim.new(0, 6)
-
-local modeToggleBtn = Instance.new("TextButton")
-modeToggleBtn.Size = UDim2.new(0.92, 0, 0, 24)
-modeToggleBtn.Position = UDim2.new(0.04, 0, 0.32, 0)
-modeToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-modeToggleBtn.Font = Enum.Font.GothamBold
-modeToggleBtn.Text = "Mode: Loot All (Workspace.Loot)"
-modeToggleBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-modeToggleBtn.TextSize = 9
-modeToggleBtn.Parent = lootContainer
-Instance.new("UICorner", modeToggleBtn).CornerRadius = UDim.new(0, 6)
-
-local lootListHeader = Instance.new("TextLabel")
-lootListHeader.Size = UDim2.new(0.92, 0, 0, 16)
-lootListHeader.Position = UDim2.new(0.04, 0, 0.44, 0)
-lootListHeader.BackgroundTransparency = 1
-lootListHeader.Font = Enum.Font.GothamBold
-lootListHeader.Text = "Detected Loot Items (Auto-Updating):"
-lootListHeader.TextColor3 = Color3.fromRGB(170, 170, 170)
-lootListHeader.TextSize = 10
-lootListHeader.TextXAlignment = Enum.TextXAlignment.Left
-lootListHeader.Parent = lootContainer
-
-local lootScrollingFrame = Instance.new("ScrollingFrame")
-lootScrollingFrame.Size = UDim2.new(0.92, 0, 0.43, 0)
-lootScrollingFrame.Position = UDim2.new(0.04, 0, 0.53, 0)
-lootScrollingFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-lootScrollingFrame.BorderSizePixel = 0
-lootScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-lootScrollingFrame.ScrollBarThickness = 4
-lootScrollingFrame.Parent = lootContainer
-Instance.new("UICorner", lootScrollingFrame).CornerRadius = UDim.new(0, 6)
-local lootScrollStroke = Instance.new("UIStroke")
-lootScrollStroke.Color = Color3.fromRGB(40, 40, 40)
-lootScrollStroke.Parent = lootScrollingFrame
-
-local selectedLootItems = {}
-
-lootToggleBtn.MouseButton1Click:Connect(function()
-	autoLootActive = not autoLootActive
-	lootToggleBtn.Text = autoLootActive and "Auto Loot: ON" or "Auto Loot: OFF"
-	lootToggleBtn.BackgroundColor3 = autoLootActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
-end)
-
-modeToggleBtn.MouseButton1Click:Connect(function()
-	lootAllMode = not lootAllMode
-	if lootAllMode then
-		modeToggleBtn.Text = "Mode: Loot All (Workspace.Loot)"
-		modeToggleBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-	else
-		modeToggleBtn.Text = "Mode: Selected Items Only"
-		modeToggleBtn.TextColor3 = Color3.fromRGB(80, 220, 255)
-	end
-end)
-
-dropSelectedBtn.MouseButton1Click:Connect(function()
-	local backpack = player:FindFirstChild("Backpack")
-	if backpack and remoteEvent then
-		for itemName, isSelected in pairs(selectedLootItems) do
-			if isSelected then
-				local bpItem = backpack:FindFirstChild(itemName)
-				if bpItem then
-					pcall(function()
-						remoteEvent:FireServer("Loot", "LootUnequip", bpItem, false)
-					end)
-				end
-			end
-		end
-	end
-end)
-
-dropAllBtn.MouseButton1Click:Connect(function()
-	local backpack = player:FindFirstChild("Backpack")
-	if backpack and remoteEvent then
-		for _, bpItem in ipairs(backpack:GetChildren()) do
-			local itemName = bpItem.Name
-			local isBackpack = string.find(itemName, "Backpack") ~= nil
-			local isArmor = string.find(itemName, "Armor") ~= nil
-			
-			if not isBackpack and not isArmor then
-				pcall(function()
-					remoteEvent:FireServer("Loot", "LootUnequip", bpItem, false)
-				end)
-			end
-		end
-	end
-end)
-
---[ Settings Tab Contents ]--
-local stY = 8
-
--- 1. CFrame Speed Toggle & Box
-local speedToggleBtn = Instance.new("TextButton")
-speedToggleBtn.Size = UDim2.new(0.58, 0, 0, 30)
-speedToggleBtn.Position = UDim2.new(0.04, 0, 0, stY)
-speedToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-speedToggleBtn.Font = Enum.Font.GothamBold
-speedToggleBtn.Text = "CFrame Speed: OFF"
-speedToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-speedToggleBtn.TextSize = 10
-speedToggleBtn.Parent = settingsContainer
-Instance.new("UICorner", speedToggleBtn).CornerRadius = UDim.new(0, 6)
-
-local speedBox = Instance.new("TextBox")
-speedBox.Size = UDim2.new(0.31, 0, 0, 30)
-speedBox.Position = UDim2.new(0.65, 0, 0, stY)
-speedBox.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-speedBox.Font = Enum.Font.GothamBold
-speedBox.Text = tostring(customCFrameSpeed)
-speedBox.TextSize = 11
-speedBox.ClearTextOnFocus = false
-speedBox.Parent = settingsContainer
-Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 6)
-
-speedToggleBtn.MouseButton1Click:Connect(function()
-	speedModActive = not speedModActive
-	speedToggleBtn.Text = speedModActive and "CFrame Speed: ON" or "CFrame Speed: OFF"
-	speedToggleBtn.BackgroundColor3 = speedModActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
-end)
-
-speedBox.FocusLost:Connect(function()
-	local val = tonumber(speedBox.Text)
-	if val and val > 0 then customCFrameSpeed = val end
-	speedBox.Text = tostring(customCFrameSpeed)
-end)
-
-stY = stY + 38
-
--- 2. JumpPower Box
-local jumpLbl = Instance.new("TextLabel")
-jumpLbl.Size = UDim2.new(0.58, 0, 0, 26)
-jumpLbl.Position = UDim2.new(0.04, 0, 0, stY)
-jumpLbl.BackgroundTransparency = 1
-jumpLbl.Font = Enum.Font.GothamBold
-jumpLbl.Text = "JumpPower Value:"
-jumpLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
-jumpLbl.TextSize = 11
-jumpLbl.TextXAlignment = Enum.TextXAlignment.Left
-jumpLbl.Parent = settingsContainer
-
-local jumpBox = Instance.new("TextBox")
-jumpBox.Size = UDim2.new(0.31, 0, 0, 26)
-jumpBox.Position = UDim2.new(0.65, 0, 0, stY)
-jumpBox.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-jumpBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-jumpBox.Font = Enum.Font.GothamBold
-jumpBox.Text = tostring(customJumpPower)
-jumpBox.TextSize = 11
-jumpBox.ClearTextOnFocus = false
-jumpBox.Parent = settingsContainer
-Instance.new("UICorner", jumpBox).CornerRadius = UDim.new(0, 6)
-
-jumpBox.FocusLost:Connect(function()
-	local val = tonumber(jumpBox.Text)
-	if val and val >= 0 then customJumpPower = val end
-	jumpBox.Text = tostring(customJumpPower)
-end)
-
-stY = stY + 34
-
--- 3. Noclip Toggle
-local noclipToggleBtn = Instance.new("TextButton")
-noclipToggleBtn.Size = UDim2.new(0.92, 0, 0, 30)
-noclipToggleBtn.Position = UDim2.new(0.04, 0, 0, stY)
-noclipToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-noclipToggleBtn.Font = Enum.Font.GothamBold
-noclipToggleBtn.Text = "Noclip: OFF"
-noclipToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-noclipToggleBtn.TextSize = 10
-noclipToggleBtn.Parent = settingsContainer
-Instance.new("UICorner", noclipToggleBtn).CornerRadius = UDim.new(0, 6)
-
-noclipToggleBtn.MouseButton1Click:Connect(function()
-	noclipActive = not noclipActive
-	noclipToggleBtn.Text = noclipActive and "Noclip: ON" or "Noclip: OFF"
-	noclipToggleBtn.BackgroundColor3 = noclipActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
-end)
-
-stY = stY + 38
-
--- 4. Infinite Jump Toggle (Using Working JumpRequest Hook)
-local infJumpToggleBtn = Instance.new("TextButton")
-infJumpToggleBtn.Size = UDim2.new(0.92, 0, 0, 30)
-infJumpToggleBtn.Position = UDim2.new(0.04, 0, 0, stY)
-infJumpToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-infJumpToggleBtn.Font = Enum.Font.GothamBold
-infJumpToggleBtn.Text = "Infinite Jump: OFF"
-infJumpToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-infJumpToggleBtn.TextSize = 10
-infJumpToggleBtn.Parent = settingsContainer
-Instance.new("UICorner", infJumpToggleBtn).CornerRadius = UDim.new(0, 6)
-
-infJumpToggleBtn.MouseButton1Click:Connect(function()
-	infJumpActive = not infJumpActive
-	infJumpToggleBtn.Text = infJumpActive and "Infinite Jump: ON" or "Infinite Jump: OFF"
-	infJumpToggleBtn.BackgroundColor3 = infJumpActive and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
-end)
-
-stY = stY + 38
-
--- 5. Mobile 3rd Person Toggle
-local mobileTPLabel = Instance.new("TextLabel")
-mobileTPLabel.Size = UDim2.new(0.65, 0, 0, 32)
-mobileTPLabel.Position = UDim2.new(0.04, 0, 0, stY)
-mobileTPLabel.BackgroundTransparency = 1
-mobileTPLabel.Font = Enum.Font.GothamBold
-mobileTPLabel.Text = "Force 3rd Person (Mobile):"
-mobileTPLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-mobileTPLabel.TextSize = 11
-mobileTPLabel.TextXAlignment = Enum.TextXAlignment.Left
-mobileTPLabel.Parent = settingsContainer
-
-local mobileTPBtn = Instance.new("TextButton")
-mobileTPBtn.Size = UDim2.new(0.24, 0, 0, 32)
-mobileTPBtn.Position = UDim2.new(0.72, 0, 0, stY)
-mobileTPBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-mobileTPBtn.Font = Enum.Font.GothamBold
-mobileTPBtn.Text = "OFF"
-mobileTPBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-mobileTPBtn.TextSize = 11
-mobileTPBtn.Parent = settingsContainer
-Instance.new("UICorner", mobileTPBtn).CornerRadius = UDim.new(0, 6)
-
-mobileTPBtn.MouseButton1Click:Connect(function()
-	forceThirdPersonMobile = not forceThirdPersonMobile
-	if forceThirdPersonMobile then
-		mobileTPBtn.Text = "ON"
-		mobileTPBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 35)
-	else
-		mobileTPBtn.Text = "OFF"
-		mobileTPBtn.BackgroundColor3 = Color3.fromRGB(150, 25, 25)
-		player.CameraMode = originalCameraMode
-		player.CameraMinZoomDistance = originalCameraMinZoom
-		player.CameraMaxZoomDistance = originalCameraMaxZoom
-	end
-end)
-
---[ Welcome Popup Modal ]--
-local modalOverlay = Instance.new("Frame")
-modalOverlay.Name = "WelcomeModal"
-modalOverlay.Size = UDim2.new(1, 0, 1, 0)
-modalOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-modalOverlay.BackgroundTransparency = 0.5
-modalOverlay.ZIndex = 10
-modalOverlay.Parent = screenGui
-
-local modalFrame = Instance.new("Frame")
-modalFrame.Size = UDim2.new(0, 310, 0, 180)
-modalFrame.Position = UDim2.new(0.5, -155, 0.5, -90)
-modalFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-modalFrame.BorderSizePixel = 0
-modalFrame.ZIndex = 11
-modalFrame.Parent = modalOverlay
-
-Instance.new("UICorner", modalFrame).CornerRadius = UDim.new(0, 12)
-local modalStroke = Instance.new("UIStroke")
-modalStroke.Color = Color3.fromRGB(180, 30, 30)
-modalStroke.Thickness = 1.5
-modalStroke.Parent = modalFrame
-
-local modalTitle = Instance.new("TextLabel")
-modalTitle.Size = UDim2.new(1, 0, 0, 40)
-modalTitle.Position = UDim2.new(0, 0, 0, 10)
-modalTitle.BackgroundTransparency = 1
-modalTitle.Font = Enum.Font.GothamBold
-modalTitle.Text = "WELCOME TO JIM HUB"
-modalTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-modalTitle.TextSize = 14
-modalTitle.ZIndex = 12
-modalTitle.Parent = modalFrame
-
-local modalDesc = Instance.new("TextLabel")
-modalDesc.Size = UDim2.new(0.85, 0, 0, 60)
-modalDesc.Position = UDim2.new(0.075, 0, 0, 50)
-modalDesc.BackgroundTransparency = 1
-modalDesc.Font = Enum.Font.GothamMedium
-modalDesc.Text = "PC Players: Press <font color='#FF3C3C'>G</font> to toggle 3rd Person & unlock your mouse freely!"
-modalDesc.RichText = true
-modalDesc.TextColor3 = Color3.fromRGB(200, 200, 200)
-modalDesc.TextSize = 12
-modalDesc.TextWrapped = true
-modalDesc.ZIndex = 12
-modalDesc.Parent = modalFrame
-
-local closePopupBtn = Instance.new("TextButton")
-closePopupBtn.Size = UDim2.new(0.85, 0, 0, 36)
-closePopupBtn.Position = UDim2.new(0.075, 0, 0, 125)
-closePopupBtn.BackgroundColor3 = Color3.fromRGB(160, 25, 25)
-closePopupBtn.Font = Enum.Font.GothamBold
-closePopupBtn.Text = "Got it!"
-closePopupBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closePopupBtn.TextSize = 12
-closePopupBtn.ZIndex = 12
-closePopupBtn.Parent = modalFrame
-Instance.new("UICorner", closePopupBtn).CornerRadius = UDim.new(0, 8)
-
-closePopupBtn.MouseButton1Click:Connect(function()
-	modalOverlay:Destroy()
-end)
-
--- Tab Switching Logic
-local function switchTab(activeTab)
-	combatContainer.Visible = (activeTab == "Combat")
-	vehicleContainer.Visible = (activeTab == "Vehicle")
-	lootContainer.Visible = (activeTab == "Loot")
-	settingsContainer.Visible = (activeTab == "Settings")
-
-	combatTabBtn.BackgroundColor3 = (activeTab == "Combat") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
-	combatTabBtn.TextColor3 = (activeTab == "Combat") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
-
-	vehicleTabBtn.BackgroundColor3 = (activeTab == "Vehicle") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
-	vehicleTabBtn.TextColor3 = (activeTab == "Vehicle") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
-
-	lootTabBtn.BackgroundColor3 = (activeTab == "Loot") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
-	lootTabBtn.TextColor3 = (activeTab == "Loot") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
-
-	settingsTabBtn.BackgroundColor3 = (activeTab == "Settings") and Color3.fromRGB(150, 25, 25) or Color3.fromRGB(30, 30, 30)
-	settingsTabBtn.TextColor3 = (activeTab == "Settings") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
-end
-
-combatTabBtn.MouseButton1Click:Connect(function() switchTab("Combat") end)
-vehicleTabBtn.MouseButton1Click:Connect(function() switchTab("Vehicle") end)
-lootTabBtn.MouseButton1Click:Connect(function() switchTab("Loot") end)
-settingsTabBtn.MouseButton1Click:Connect(function() switchTab("Settings") end)
-
--- UI Toggle / Minimize Functionality
-local hubVisible = true
-toggleGuiBtn.MouseButton1Click:Connect(function()
-	hubVisible = not hubVisible
-	mainFrame.Visible = hubVisible
-	toggleGuiBtn.Text = hubVisible and "JIM HUB: ON" or "JIM HUB: OFF"
-	toggleGuiBtn.TextColor3 = hubVisible and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(140, 140, 140)
-	toggleStroke.Color = hubVisible and Color3.fromRGB(180, 30, 30) or Color3.fromRGB(70, 70, 70)
-end)
-
--- Dragging Implementation
-local dragging, dragStart, startPos = false, nil, nil
-titleBar.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = mainFrame.Position
-	end
-end)
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-	end
-end)
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = false
-	end
-end)
-
-rangeTextBox.FocusLost:Connect(function()
-	local newRange = tonumber(rangeTextBox.Text)
-	if newRange and newRange > 0 then ATTACK_RANGE = newRange end
-	rangeTextBox.Text = tostring(ATTACK_RANGE)
-end)
-
-visButton.MouseButton1Click:Connect(function()
-	showVisualizer = not showVisualizer
-	visButton.Text = showVisualizer and "Ring: ON" or "Ring: OFF"
-	visButton.TextColor3 = showVisualizer and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 180, 180)
-	visButton.BackgroundColor3 = showVisualizer and Color3.fromRGB(90, 20, 20) or Color3.fromRGB(25, 25, 25)
-end)
-
-toggleButton.MouseButton1Click:Connect(function()
-	isRunning = not isRunning
-	statusLabel.Text = isRunning and "Status: ON" or "Status: OFF"
-	statusLabel.TextColor3 = isRunning and Color3.fromRGB(80, 255, 80) or Color3.fromRGB(220, 80, 80)
-	toggleButton.Text = isRunning and "Auto Attack: ON" or "Auto Attack: OFF"
-	toggleButton.BackgroundColor3 = isRunning and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
-	if not isRunning then targetLabel.Text = "Hits: 0 | Breaks: 0" end
-end)
-
-autoBreakToggleBtn.MouseButton1Click:Connect(function()
-	autoBreakRunning = not autoBreakRunning
-	autoBreakToggleBtn.Text = autoBreakRunning and "Auto Break Multi-Hit: ON" or "Auto Break Multi-Hit: OFF"
-	autoBreakToggleBtn.BackgroundColor3 = autoBreakRunning and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(150, 25, 25)
-	if not autoBreakRunning then targetLabel.Text = "Hits: 0 | Breaks: 0" end
-end)
-
--- Working Infinite Jump Listener via JumpRequest
-UserInputService.JumpRequest:Connect(function()
-	if infJumpActive then
-		local character = player.Character
-		if character then
-			local humanoid = character:FindFirstChildOfClass("Humanoid")
-			if humanoid then
-				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-			end
-		end
-	end
-end)
-
--- Key inputs (G for camera unlock)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-	if input.KeyCode == Enum.KeyCode.G then
-		toggledMode = not toggledMode
-		if toggledMode then
-			player.CameraMode = Enum.CameraMode.Classic
-			player.CameraMinZoomDistance = 10
-			player.CameraMaxZoomDistance = 400
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-			UserInputService.MouseIconEnabled = true
-		else
-			if not forceThirdPersonMobile then
-				player.CameraMode = originalCameraMode
-				player.CameraMinZoomDistance = originalCameraMinZoom
-				player.CameraMaxZoomDistance = originalCameraMaxZoom
-			end
-			UserInputService.MouseBehavior = originalMouseBehavior
-			UserInputService.MouseIconEnabled = originalMouseIconEnabled
-		end
-	end
-end)
-
-local originalCarDetected = false
-local currentHits = 0
-local currentBreaks = 0
+-- Stats Tracking Variables (Using active farming time only for absolute rate precision)
+local totalMoneyEarned = 0
+local activeFarmingTime = 0
+local lastTickTime = tick()
 
 --[================================================================]--
--- Main Processing Loop
+--                            UTILITY FUNCTIONS                     --
 --[================================================================]--
 
-RunService.Heartbeat:Connect(function(dt)
-	local character = player.Character
-	if character then
-		local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		
-		-- CFrame Speed Handler
-		if humanoidRootPart and humanoid then
-			if speedModActive then
-				humanoid.WalkSpeed = 16 -- keep base normal to prevent native prediction glitches
-				local moveDir = humanoid.MoveDirection
-				if moveDir.Magnitude > 0 then
-					humanoidRootPart.CFrame = humanoidRootPart.CFrame + (moveDir * customCFrameSpeed * dt)
-				end
-			end
-			
-			-- JumpPower Handler
-			if customJumpPower then
-				pcall(function()
-					humanoid.JumpPower = customJumpPower
-					humanoid.UseJumpPower = true
-				end)
-			end
-		end
-		
-		-- Noclip Handler
-		if noclipActive then
-			for _, part in ipairs(character:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.CanCollide = false
-				end
-			end
-		end
-		
-		if forceThirdPersonMobile then
-			player.CameraMode = Enum.CameraMode.Classic
-			if player.CameraMinZoomDistance < 10 then player.CameraMinZoomDistance = 10 end
-			if player.CameraMaxZoomDistance < 400 then player.CameraMaxZoomDistance = 400 end
-		end
-		
-		if toggledMode and player.CameraMinZoomDistance < 10 then
-			player.CameraMinZoomDistance = 10
-		end
-		
-		if humanoidRootPart and showVisualizer then
-			rangeRing.Transparency = 0.7
-			rangeRing.CFrame = CFrame.new(humanoidRootPart.Position - Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.rad(90))
-			rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
-		else
-			rangeRing.Transparency = 1
-		end
-		
-		-- Auto Loot Dynamic Updating & Handling
-		local lootFolder = workspace:FindFirstChild("Loot")
-		local backpack = player:FindFirstChild("Backpack")
-		local discoveredItems = {}
-		
-		if lootFolder then
-			for _, lootItem in ipairs(lootFolder:GetChildren()) do
-				discoveredItems[lootItem.Name] = true
-			end
-		end
-		if backpack then
-			for _, bpItem in ipairs(backpack:GetChildren()) do
-				discoveredItems[bpItem.Name] = true
-			end
-		end
-		
-		local itemY = 0
-		local existingGuiItems = {}
-		for _, child in ipairs(lootScrollingFrame:GetChildren()) do
-			if child:IsA("TextButton") then existingGuiItems[child.Name] = child end
-		end
-		
-		for itemName, _ in pairs(discoveredItems) do
-			if selectedLootItems[itemName] == nil then
-				selectedLootItems[itemName] = false
-			end
-			
-			local itemBtn = existingGuiItems[itemName]
-			if not itemBtn then
-				itemBtn = Instance.new("TextButton")
-				itemBtn.Name = itemName
-				itemBtn.Size = UDim2.new(1, -8, 0, 24)
-				itemBtn.Font = Enum.Font.GothamMedium
-				itemBtn.TextSize = 10
-				itemBtn.Parent = lootScrollingFrame
-				Instance.new("UICorner", itemBtn).CornerRadius = UDim.new(0, 4)
-				
-				itemBtn.MouseButton1Click:Connect(function()
-					selectedLootItems[itemName] = not selectedLootItems[itemName]
-				end)
-			end
-			
-			if selectedLootItems[itemName] then
-				itemBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 35)
-				itemBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-				itemBtn.Text = "✓ " .. itemName
-			else
-				itemBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-				itemBtn.TextColor3 = Color3.fromRGB(160, 160, 160)
-				itemBtn.Text = "□ " .. itemName
-			end
-			
-			itemBtn.Position = UDim2.new(0, 4, 0, itemY)
-			itemY = itemY + 28
-		end
-		
-		for name, btn in pairs(existingGuiItems) do
-			if not discoveredItems[name] then
-				btn:Destroy()
-			end
-		end
-		lootScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, itemY + 5)
-		
-		if autoLootActive and lootFolder and remoteFunction then
-			for _, lootItem in ipairs(lootFolder:GetChildren()) do
-				local name = lootItem.Name
-				local shouldLoot = false
-				
-				if lootAllMode then
-					shouldLoot = true
-				elseif selectedLootItems[name] then
-					shouldLoot = true
-				end
-				
-				if shouldLoot then
-					local targetHandle = lootItem:FindFirstChild("Handle") or lootItem:FindFirstChildWhichIsA("BasePart")
-					if targetHandle then
-						pcall(function()
-							remoteFunction:InvokeServer("Loot", "LootEquip", targetHandle)
-						end)
-					end
-				end
-			end
-		end
-		
-		-- Vehicle Tracker Loop
-		local vehiclesFolder = workspace:FindFirstChild("Vehicles")
-		if vehiclesFolder then
-			local targetVehicle = vehiclesFolder:FindFirstChild("Claptima")
-			if not targetVehicle then
-				local children = vehiclesFolder:GetChildren()
-				if #children > 0 then targetVehicle = children[1] end
-			end
-			
-			if targetVehicle then
-				vehicleStatus.Text = "Target: " .. targetVehicle.Name
-				local propFolder = targetVehicle:FindFirstChild("VehicleProperty")
-				
-				if not originalCarDetected then
-					for propName, box in pairs(propertyBoxes) do
-						local nativeVal = nil
-						pcall(function()
-							if propFolder then nativeVal = propFolder:GetAttribute(propName) or propFolder[propName] end
-							if not nativeVal then nativeVal = targetVehicle:GetAttribute(propName) or targetVehicle[propName] end
-						end)
-						if nativeVal then
-							originalVehicleProperties[propName] = nativeVal
-							box.Text = tostring(nativeVal)
-						end
-					end
-					originalCarDetected = true
-				end
-				
-				for propName, box in pairs(propertyBoxes) do
-					local appliedVal = nil
-					if vehicleModActive then
-						appliedVal = tonumber(box.Text)
-					else
-						appliedVal = originalVehicleProperties[propName]
-						if not box.IsFocused and appliedVal then box.Text = tostring(appliedVal) end
-					end
-					
-					if appliedVal then
-						pcall(function()
-							if propFolder then
-								propFolder:SetAttribute(propName, appliedVal)
-								propFolder[propName] = appliedVal
-							end
-							targetVehicle:SetAttribute(propName, appliedVal)
-							targetVehicle[propName] = appliedVal
-						end)
-					end
-				end
-				
-				if vehicleModActive then
-					local targetGasVal = tonumber(gasTextBox.Text)
-					if targetGasVal then
-						local gasObj = targetVehicle:FindFirstChild("gasLevel")
-						if gasObj then pcall(function() gasObj.Value = targetGasVal end) end
-					end
-				end
-			else
-				vehicleStatus.Text = "Target Vehicle: None found"
-				originalCarDetected = false
-			end
-		else
-			vehicleStatus.Text = "Target Vehicle: workspace.Vehicles missing!"
-			originalCarDetected = false
-		end
-		
-		-- Instant NPC Combat
-		currentHits = 0
-		if isRunning and humanoidRootPart then
-			local npcsFolder = workspace:FindFirstChild("NPCs")
-			if npcsFolder then
-				for _, npcModel in ipairs(npcsFolder:GetChildren()) do
-					if npcModel:IsA("Model") then
-						local hum = npcModel:FindFirstChildOfClass("Humanoid")
-						local rootPart = npcModel:FindFirstChild("HumanoidRootPart") or npcModel:FindFirstChild("RootPart") or npcModel:FindFirstChild("Head")
-						
-						if hum and rootPart and hum.Health > 0 then
-							local distance = (rootPart.Position - humanoidRootPart.Position).Magnitude
-							if distance <= ATTACK_RANGE then
-								currentHits = currentHits + 1
-								pcall(function()
-									local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
-									if ev then
-										ev:FireServer("Punches", "ReplicateSound", humanoidRootPart, "Swoosh")
-										ev:FireServer("NPCs", "Damage", hum, DAMAGE_AMOUNT)
-									end
-								end)
-							end
-						end
-					end
-				end
-			end
-		end
+local function sendNotification(title, text)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = title;
+            Text = text;
+            Duration = Config.NotificationDuration;
+        })
+    end)
+end
 
-		-- Instant Multi-Hit Auto Break
-		currentBreaks = 0
-		if autoBreakRunning and humanoidRootPart then
-			local mapFolder = workspace:FindFirstChild("Map")
-			if mapFolder then
-				local buildingsFolder = mapFolder:FindFirstChild("Buildings")
-				if buildingsFolder then
-					local validTargetNames = { ["ATM"] = true, ["CashRegister"] = true, ["Vault"] = true, ["Safe"] = true }
-					
-					for _, obj in ipairs(buildingsFolder:GetDescendants()) do
-						if obj:IsA("Model") and validTargetNames[obj.Name] then
-							local targetPart = obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("RootPart") or obj:FindFirstChild("Head") or obj:FindFirstChildWhichIsA("BasePart")
-							
-							if targetPart then
-								local health = 100
-								local hum = obj:FindFirstChildOfClass("Humanoid")
-								if hum then
-									health = hum.Health
-								else
-									local healthVal = obj:FindFirstChild("Health") or obj:FindFirstChild("HP")
-									if healthVal then
-										pcall(function() health = healthVal.Value end)
-									else
-										local attrHealth = obj:GetAttribute("Health") or obj:GetAttribute("HP")
-										if attrHealth then health = attrHealth end
-									end
-								end
-								
-								if health > 0 then
-									local distance = (targetPart.Position - humanoidRootPart.Position).Magnitude
-									if distance <= ATTACK_RANGE then
-										currentBreaks = currentBreaks + 1
-										pcall(function()
-											local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
-											if ev then
-												ev:FireServer("DamageToOpen", "Damage", obj, 1000, "melee")
-											end
-										end)
-									end
-								end
-							end
-						end
-					end
-				end
-			end
-		end
+-- Anti-AFK
+local function setupAntiAFK()
+    local vu = game:GetService("VirtualUser")
+    LocalPlayer.Idled:Connect(function()
+        vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end)
+end
+setupAntiAFK()
 
-		targetLabel.Text = string.format("Hits: %d | Breaks: %d", currentHits, currentBreaks)
-	end
+-- Auto Unequip Tool function
+local function unequipActiveTool()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid:UnequipTools()
+    end
+end
+
+-- Equip Combat tool ("Combat" or fists/punch tool)
+local function equipCombatTool()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack then
+        local combatTool = backpack:FindFirstChild("Combat")
+        if combatTool then
+            humanoid:EquipTool(combatTool)
+            return true
+        end
+    end
+
+    local equippedCombat = char:FindFirstChild("Combat")
+    if equippedCombat then
+        return true
+    end
+
+    return false
+end
+
+-- Safely get CFrame for BaseParts or Models
+local function getObjectCFrame(obj)
+    if not obj then return nil end
+    if obj:IsA("BasePart") then
+        return obj.CFrame
+    elseif obj:IsA("Model") then
+        if obj.PrimaryPart then
+            return obj.PrimaryPart.CFrame
+        else
+            return obj:GetPivot()
+        end
+    end
+    return nil
+end
+
+-- Check if a cashier is valid to target based on health (must be between 1 and 100) and general broken state
+local function isValidCashier(cashier)
+    if not cashier or not cashier.Parent then return false end
+    
+    local isValid = false
+    pcall(function()
+        local humanoid = cashier:FindFirstChild("Humanoid")
+        if humanoid then
+            local hp = humanoid.Health
+            if hp >= 1 and hp <= 100 then
+                isValid = true
+            end
+        else
+            if cashier:IsA("BasePart") then
+                if cashier.Transparency < 0.9 and cashier.CanCollide then
+                    isValid = true
+                end
+            elseif cashier:IsA("Model") then
+                local primary = cashier.PrimaryPart or cashier:FindFirstChildWhichIsA("BasePart")
+                if primary and primary.Transparency < 0.9 and primary.CanCollide then
+                    isValid = true
+                end
+            end
+        end
+    end)
+    
+    return isValid
+end
+
+-- Try to parse the exact cash value from the money drop name or text labels
+local function getMoneyValue(obj)
+    local val = tonumber(obj.Name)
+    if val then return val end
+
+    for _, descendant in ipairs(obj:GetDescendants()) do
+        if descendant:IsA("TextLabel") then
+            local cleanText = descendant.Text:gsub("[^%d]", "")
+            local parsedNum = tonumber(cleanText)
+            if parsedNum and parsedNum > 0 then
+                return parsedNum
+            end
+        end
+    end
+    
+    return 25 -- Default fallback value estimation for standard drops if text is hidden
+end
+
+-- Real-time precise balance delta tracking hook
+local lastKnownLeaderstatCash = nil
+local function getPlayerLeaderstatCash()
+    pcall(function()
+        local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+        if leaderstats then
+            for _, stat in ipairs(leaderstats:GetChildren()) do
+                local name = stat.Name:lower()
+                if name:find("cash") or name:find("wallet") or name:find("money") then
+                    if stat:IsA("IntValue") or stat:IsA("NumberValue") then
+                        return stat.Value
+                    end
+                end
+            end
+        end
+    end)
+    return nil
+end
+
+local function addTrackedMoney(amount)
+    totalMoneyEarned = totalMoneyEarned + (amount or 25)
+end
+
+-- Monitor true in-game leaderstats balance shifts to catch earnings that bypass standard drops
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        local currentCash = getPlayerLeaderstatCash()
+        if currentCash then
+            if lastKnownLeaderstatCash then
+                local diff = currentCash - lastKnownLeaderstatCash
+                if diff > 0 then
+                    totalMoneyEarned = totalMoneyEarned + diff
+                end
+            end
+            lastKnownLeaderstatCash = currentCash
+        end
+    end
 end)
 
-print("JIM HUB Loaded Successfully with CFrame Speed & Working Inf Jump!")
+-- Simulate natural screen tap/hover directly on the MoneyDrop object with a right offset
+local function interactWithMoneyNaturally(dropObj)
+    if not dropObj or not dropObj.Parent then return end
+
+    local camera = workspace.CurrentCamera
+    local cf = getObjectCFrame(dropObj)
+    if not cf or not camera then return end
+
+    camera.CFrame = CFrame.new(camera.CFrame.Position, cf.Position)
+    task.wait(0.06)
+
+    local screenPos, onScreen = camera:WorldToViewportPoint(cf.Position)
+    if not onScreen or screenPos.Z <= 0 then return end
+
+    local x, y = screenPos.X + 40, screenPos.Y
+
+    pcall(function()
+        VirtualInputManager:SendMouseMoveEvent(x, y, workspace)
+        task.wait(0.08)
+
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, workspace, 0)
+        task.wait(0.08)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, workspace, 0)
+    end)
+end
+
+-- Teleport directly to money drops within 20 studs after breaking a cashier and collect them
+local function collectMoneyDropsByTeleportingWithin20Studs()
+    local startTime = tick()
+    
+    while (isAutoFarmRunning or isCashierFarmRunning) and (tick() - startTime < 4.5) do
+        local char = LocalPlayer.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then break end
+        local rootPart = char.HumanoidRootPart
+        
+        rootPart.Anchored = false
+
+        local dropFolder = workspace:FindFirstChild("Ignored") and workspace.Ignored:FindFirstChild("Drop")
+        if not dropFolder then 
+            task.wait(0.3)
+            continue 
+        end
+
+        local foundAny = false
+        for _, obj in ipairs(dropFolder:GetChildren()) do
+            if obj.Name == "MoneyDrop" and obj.Parent then
+                local cf = getObjectCFrame(obj)
+                if cf then
+                    local dist = (cf.Position - rootPart.Position).Magnitude
+                    if dist <= 20 then
+                        foundAny = true
+                        unequipActiveTool()
+                        
+                        rootPart.CFrame = cf + Vector3.new(0, 1.5, 0)
+                        task.wait(0.15)
+                        
+                        addTrackedMoney(getMoneyValue(obj))
+                        interactWithMoneyNaturally(obj)
+                        task.wait(0.15)
+                    end
+                end
+            end
+        end
+
+        if not foundAny then
+            task.wait(0.2)
+        else
+            task.wait(0.1)
+        end
+    end
+end
+
+-- Reusable collection loop for general Auto Farm Cash
+local function collectNearbyMoneyDrops(maxToCollect)
+    local collectedCount = 0
+    local collectTimeout = tick()
+
+    while (isAutoFarmRunning or isCashierFarmRunning) and collectedCount < (maxToCollect or Config.CashierMoneyDropsToCollect) do
+        if tick() - collectTimeout > 6 then break end
+
+        local char = LocalPlayer.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then break end
+        local rootPart = char.HumanoidRootPart
+        rootPart.Anchored = false
+
+        local moneyObj = (function()
+            local dropFolder = workspace:FindFirstChild("Ignored") and workspace.Ignored:FindFirstChild("Drop")
+            if not dropFolder then return nil end
+
+            local bestObj = nil
+            local bestScore = -math.huge
+            local unvisitedDrops = {}
+
+            for _, obj in ipairs(dropFolder:GetChildren()) do
+                if obj.Name == "MoneyDrop" then
+                    if not visitedDrops[obj] then
+                        table.insert(unvisitedDrops, obj)
+                        local cf = getObjectCFrame(obj)
+                        if cf then
+                            local dist = (cf.Position - rootPart.Position).Magnitude
+                            local value = getMoneyValue(obj)
+                            local score = value - (dist * 1.5)
+
+                            if score > bestScore then
+                                bestScore = score
+                                bestObj = obj
+                            end
+                        end
+                    end
+                end
+            end
+
+            if #unvisitedDrops == 0 then
+                table.clear(visitedDrops)
+            end
+
+            return bestObj
+        end)()
+
+        if moneyObj then
+            local attempts = 0
+            while (isAutoFarmRunning or isCashierFarmRunning) and moneyObj and moneyObj.Parent and moneyObj:IsDescendantOf(workspace) and attempts < Config.MaxAttempts do
+                unequipActiveTool()
+                
+                local cf = getObjectCFrame(moneyObj)
+                if cf then
+                    local dist = (cf.Position - rootPart.Position).Magnitude
+                    if dist >= Config.TeleportDistanceThreshold then
+                        local currentTime = tick()
+                        if currentTime - lastTeleportTick < Config.TeleportWait then
+                            task.wait(Config.TeleportWait - (currentTime - lastTeleportTick))
+                        end
+                        rootPart.CFrame = cf + Vector3.new(0, 1.5, 0)
+                        lastTeleportTick = tick()
+                        task.wait(0.4)
+                    end
+                end
+                
+                addTrackedMoney(getMoneyValue(moneyObj))
+                interactWithMoneyNaturally(moneyObj)
+                attempts = attempts + 1
+            end
+
+            visitedDrops[moneyObj] = true
+            collectedCount = collectedCount + 1
+            task.wait(Config.Delay)
+        else
+            task.wait(0.5)
+        end
+    end
+end
+
+--[================================================================]--
+--                    DEAD / DOWNED CHECK LOGIC                     --
+--[================================================================]--
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        local char = LocalPlayer.Character
+        if char then
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health <= 0 then
+                if isAutoFarmRunning or isCashierFarmRunning then
+                    pcall(function()
+                        humanoid.Health = 0
+                    end)
+                    local oldChar = char
+                    repeat task.wait(0.5) until LocalPlayer.Character ~= oldChar and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    task.wait(1)
+                end
+            end
+        end
+    end
+end)
+
+--[================================================================]--
+--                            UI CREATION                           --
+--[================================================================]--
+
+if CoreGui:FindFirstChild("DaHoodAutoFarmUI") then
+    CoreGui.DaHoodAutoFarmUI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DaHoodAutoFarmUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+if syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = CoreGui
+else
+    ScreenGui.Parent = CoreGui
+end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 320, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
+
+-- Top Bar
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 40)
+TopBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+
+local TopBarCorner = Instance.new("UICorner")
+TopBarCorner.CornerRadius = UDim.new(0, 10)
+TopBarCorner.Parent = TopBar
+
+local TopBarFix = Instance.new("Frame")
+TopBarFix.Size = UDim2.new(1, 0, 0, 10)
+TopBarFix.Position = UDim2.new(0, 0, 1, -10)
+TopBarFix.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+TopBarFix.BorderSizePixel = 0
+TopBarFix.Parent = TopBar
+
+-- Title
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -50, 1, 0)
+TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "Da Hood Auto Farm"
+TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+TitleLabel.TextSize = 14
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = TopBar
+
+-- Minimize Button
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(1, -35, 0, 5)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+MinimizeButton.Font = Enum.Font.GothamBold
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.fromRGB(240, 240, 240)
+MinimizeButton.TextSize = 16
+MinimizeButton.Parent = TopBar
+
+local MinCorner = Instance.new("UICorner")
+MinCorner.CornerRadius = UDim.new(0, 6)
+MinCorner.Parent = MinimizeButton
+
+-- Container for content
+local Container = Instance.new("ScrollingFrame")
+Container.Name = "Container"
+Container.Size = UDim2.new(1, -20, 1, -55)
+Container.Position = UDim2.new(0, 10, 0, 45)
+Container.BackgroundTransparency = 1
+Container.BorderSizePixel = 0
+Container.CanvasSize = UDim2.new(0, 0, 0, 360)
+Container.ScrollBarThickness = 4
+Container.Parent = MainFrame
+
+-- Status Section
+local StatusContainer = Instance.new("Frame")
+StatusContainer.Size = UDim2.new(1, 0, 0, 45)
+StatusContainer.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+StatusContainer.Parent = Container
+
+local StatusCorner = Instance.new("UICorner")
+StatusCorner.CornerRadius = UDim.new(0, 6)
+StatusCorner.Parent = StatusContainer
+
+local StatusTitle = Instance.new("TextLabel")
+StatusTitle.Size = UDim2.new(0.5, 0, 1, 0)
+StatusTitle.Position = UDim2.new(0, 12, 0, 0)
+StatusTitle.BackgroundTransparency = 1
+StatusTitle.Font = Enum.Font.GothamMedium
+StatusTitle.Text = "Status:"
+StatusTitle.TextColor3 = Color3.fromRGB(180, 180, 190)
+StatusTitle.TextSize = 13
+StatusTitle.TextXAlignment = Enum.TextXAlignment.Left
+StatusTitle.Parent = StatusContainer
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0.5, 0, 1, 0)
+StatusLabel.Position = UDim2.new(0.5, -12, 0, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.Text = "Stopped"
+StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+StatusLabel.TextSize = 13
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Right
+StatusLabel.Parent = StatusContainer
+
+-- Stats Section (Money Made & Per Minute)
+local StatsContainer = Instance.new("Frame")
+StatsContainer.Size = UDim2.new(1, 0, 0, 80)
+StatsContainer.Position = UDim2.new(0, 0, 0, 55)
+StatsContainer.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+StatsContainer.Parent = Container
+
+local StatsCorner = Instance.new("UICorner")
+StatsCorner.CornerRadius = UDim.new(0, 6)
+StatsCorner.Parent = StatsContainer
+
+local StatsHeader = Instance.new("TextLabel")
+StatsHeader.Size = UDim2.new(1, -24, 0, 25)
+StatsHeader.Position = UDim2.new(0, 12, 0, 5)
+StatsHeader.BackgroundTransparency = 1
+StatsHeader.Font = Enum.Font.GothamBold
+StatsHeader.Text = "Session Statistics"
+StatsHeader.TextColor3 = Color3.fromRGB(200, 200, 210)
+StatsHeader.TextSize = 12
+StatsHeader.TextXAlignment = Enum.TextXAlignment.Left
+StatsHeader.Parent = StatsContainer
+
+local MoneyMadeLabel = Instance.new("TextLabel")
+MoneyMadeLabel.Size = UDim2.new(1, -24, 0, 20)
+MoneyMadeLabel.Position = UDim2.new(0, 12, 0, 30)
+MoneyMadeLabel.BackgroundTransparency = 1
+MoneyMadeLabel.Font = Enum.Font.GothamMedium
+MoneyMadeLabel.Text = "Earned: $0"
+MoneyMadeLabel.TextColor3 = Color3.fromRGB(150, 220, 150)
+MoneyMadeLabel.TextSize = 12
+MoneyMadeLabel.TextXAlignment = Enum.TextXAlignment.Left
+MoneyMadeLabel.Parent = StatsContainer
+
+local MoneyPerMinLabel = Instance.new("TextLabel")
+MoneyPerMinLabel.Size = UDim2.new(1, -24, 0, 20)
+MoneyPerMinLabel.Position = UDim2.new(0, 12, 0, 50)
+MoneyPerMinLabel.BackgroundTransparency = 1
+MoneyPerMinLabel.Font = Enum.Font.GothamMedium
+MoneyPerMinLabel.Text = "Rate: $0 / min"
+MoneyPerMinLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+MoneyPerMinLabel.TextSize = 12
+MoneyPerMinLabel.TextXAlignment = Enum.TextXAlignment.Left
+MoneyPerMinLabel.Parent = StatsContainer
+
+-- Auto Farm Toggle Row
+local ToggleContainer = Instance.new("Frame")
+ToggleContainer.Size = UDim2.new(1, 0, 0, 50)
+ToggleContainer.Position = UDim2.new(0, 0, 0, 145)
+ToggleContainer.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+ToggleContainer.Parent = Container
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 6)
+ToggleCorner.Parent = ToggleContainer
+
+local ToggleTitle = Instance.new("TextLabel")
+ToggleTitle.Size = UDim2.new(0.7, 0, 1, 0)
+ToggleTitle.Position = UDim2.new(0, 12, 0, 0)
+ToggleTitle.BackgroundTransparency = 1
+ToggleTitle.Font = Enum.Font.GothamMedium
+ToggleTitle.Text = "Auto Farm Cash"
+ToggleTitle.TextColor3 = Color3.fromRGB(220, 220, 230)
+ToggleTitle.TextSize = 13
+ToggleTitle.TextXAlignment = Enum.TextXAlignment.Left
+ToggleTitle.Parent = ToggleContainer
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 46, 0, 24)
+ToggleBtn.Position = UDim2.new(1, -58, 0.5, -12)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+ToggleBtn.Text = ""
+ToggleBtn.Parent = ToggleContainer
+
+local ToggleBtnCorner = Instance.new("UICorner")
+ToggleBtnCorner.CornerRadius = UDim.new(1, 0)
+ToggleBtnCorner.Parent = ToggleBtn
+
+local ToggleCircle = Instance.new("Frame")
+ToggleCircle.Size = UDim2.new(0, 18, 0, 18)
+ToggleCircle.Position = UDim2.new(0, 3, 0.5, -9)
+ToggleCircle.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
+ToggleCircle.Parent = ToggleBtn
+
+local CircleCorner = Instance.new("UICorner")
+CircleCorner.CornerRadius = UDim.new(1, 0)
+CircleCorner.Parent = ToggleCircle
+
+-- Cashier Farm Toggle Row
+local CashierContainer = Instance.new("Frame")
+CashierContainer.Size = UDim2.new(1, 0, 0, 50)
+CashierContainer.Position = UDim2.new(0, 0, 0, 205)
+CashierContainer.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+CashierContainer.Parent = Container
+
+local CashierCorner = Instance.new("UICorner")
+CashierCorner.CornerRadius = UDim.new(0, 6)
+CashierCorner.Parent = CashierContainer
+
+local CashierTitle = Instance.new("TextLabel")
+CashierTitle.Size = UDim2.new(0.7, 0, 1, 0)
+CashierTitle.Position = UDim2.new(0, 12, 0, 0)
+CashierTitle.BackgroundTransparency = 1
+CashierTitle.Font = Enum.Font.GothamMedium
+CashierTitle.Text = "Auto Cashier Farm"
+CashierTitle.TextColor3 = Color3.fromRGB(220, 220, 230)
+CashierTitle.TextSize = 13
+CashierTitle.TextXAlignment = Enum.TextXAlignment.Left
+CashierTitle.Parent = CashierContainer
+
+local CashierToggleBtn = Instance.new("TextButton")
+CashierToggleBtn.Size = UDim2.new(0, 46, 0, 24)
+CashierToggleBtn.Position = UDim2.new(1, -58, 0.5, -12)
+CashierToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+CashierToggleBtn.Text = ""
+CashierToggleBtn.Parent = CashierContainer
+
+local CashierBtnCorner = Instance.new("UICorner")
+CashierBtnCorner.CornerRadius = UDim.new(1, 0)
+CashierBtnCorner.Parent = CashierToggleBtn
+
+local CashierToggleCircle = Instance.new("Frame")
+CashierToggleCircle.Size = UDim2.new(0, 18, 0, 18)
+CashierToggleCircle.Position = UDim2.new(0, 3, 0.5, -9)
+CashierToggleCircle.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
+CashierToggleCircle.Parent = CashierToggleBtn
+
+local CashierCircleCorner = Instance.new("UICorner")
+CashierCircleCorner.CornerRadius = UDim.new(1, 0)
+CashierCircleCorner.Parent = CashierToggleCircle
+
+-- Update High-Precision Stats UI Loop
+task.spawn(function()
+    while true do
+        task.wait(0.2)
+        local currentTick = tick()
+        local delta = currentTick - lastTickTime
+        lastTickTime = currentTick
+
+        if isAutoFarmRunning or isCashierFarmRunning then
+            activeFarmingTime = activeFarmingTime + delta
+        end
+
+        local elapsedMinutes = activeFarmingTime / 60
+        local rate = elapsedMinutes > 0 and math.floor(totalMoneyEarned / elapsedMinutes) or 0
+        
+        MoneyMadeLabel.Text = "Earned: $" .. tostring(totalMoneyEarned)
+        MoneyPerMinLabel.Text = "Rate: $" .. tostring(rate) .. " / min"
+    end
+end)
+
+--[================================================================]--
+--                         AUTO FARM LOGIC                          --
+--[================================================================]--
+
+task.spawn(function()
+    while true do
+        if isAutoFarmRunning then
+            collectNearbyMoneyDrops(1)
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+--[================================================================]--
+--                       CASHIER FARM LOGIC                         --
+--[================================================================]--
+
+task.spawn(function()
+    while true do
+        if isCashierFarmRunning then
+            local cashiersFolder = workspace:FindFirstChild("Cashiers")
+            local char = LocalPlayer.Character
+
+            -- Comprehensive death/downed check function for current character state
+            local function isPlayerDownedOrDead()
+                local c = LocalPlayer.Character
+                if not c then return true end
+                local hum = c:FindFirstChildOfClass("Humanoid")
+                if not hum or hum.Health <= 0 then return true end
+                -- Da Hood knockout state check (BodyEffects handling)
+                local bodyEffects = c:FindFirstChild("BodyEffects")
+                if bodyEffects then
+                    local ko = bodyEffects:FindFirstChild("Killed") or bodyEffects:FindFirstChild("Dead")
+                    local grabbed = bodyEffects:FindFirstChild("Grabbed")
+                    if (ko and ko.Value) or (grabbed and grabbed.Value) then
+                        return true
+                    end
+                end
+                return false
+            end
+
+            if cashiersFolder and char and char:FindFirstChild("HumanoidRootPart") and not isPlayerDownedOrDead() then
+                local rootPart = char.HumanoidRootPart
+                local cashiers = cashiersFolder:GetChildren()
+
+                for _, cashier in ipairs(cashiers) do
+                    if not isCashierFarmRunning or isPlayerDownedOrDead() then break end
+
+                    if not isValidCashier(cashier) then continue end
+
+                    local cashierCf = getObjectCFrame(cashier)
+
+                    if cashierCf then
+                        rootPart.Anchored = false
+                        local currentTime = tick()
+                        if currentTime - lastTeleportTick < Config.TeleportWait then
+                            task.wait(Config.TeleportWait - (currentTime - lastTeleportTick))
+                        end
+                        
+                        local targetBaseCFrame = cashierCf + Vector3.new(0, 3, 0)
+                        rootPart.CFrame = targetBaseCFrame
+                        lastTeleportTick = tick()
+                        task.wait(0.4)
+
+                        local lockedPositionCFrame = targetBaseCFrame - Vector3.new(0, 3, 0)
+                        rootPart.CFrame = lockedPositionCFrame
+                        rootPart.Anchored = true
+
+                        equipCombatTool()
+                        task.wait(0.2)
+
+                        local startTime = tick()
+                        while isCashierFarmRunning and cashier and cashier.Parent and not isPlayerDownedOrDead() do
+                            if tick() - startTime > 15 then break end
+                            if not isValidCashier(cashier) then break end
+
+                            local currentDist = (rootPart.Position - lockedPositionCFrame.Position).Magnitude
+                            if currentDist > 2 then
+                                rootPart.Anchored = false
+                                rootPart.CFrame = lockedPositionCFrame
+                                task.wait(0.05)
+                                rootPart.Anchored = true
+                            end
+
+                            equipCombatTool()
+
+                            -- CHARGE ATTACK LOGIC (Set to 1.3s)
+                            pcall(function()
+                                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                                if humanoid then
+                                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, workspace, 0)
+                                    task.wait(1.3)
+                                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, workspace, 0)
+                                end
+                            end)
+
+                            task.wait(0.3)
+                        end
+
+                        unequipActiveTool()
+                        task.wait(0.2)
+
+                        rootPart.Anchored = false
+                        
+                        if not isPlayerDownedOrDead() then
+                            collectMoneyDropsByTeleportingWithin20Studs()
+                        end
+                    end
+                end
+            else
+                -- If dead, downed, or waiting for character load, pause and unanchor until respawned successfully
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    LocalPlayer.Character.HumanoidRootPart.Anchored = false
+                end
+                
+                -- Wait until the character respawns fully and is ready/alive
+                repeat
+                    task.wait(0.5)
+                until not isPlayerDownedOrDead() and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                
+                task.wait(1) -- Extra stabilization buffer after full respawn before cycling back
+            end
+        else
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                LocalPlayer.Character.HumanoidRootPart.Anchored = false
+            end
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- Cleanup destroyed drops
+task.spawn(function()
+    while true do
+        task.wait(10)
+        for obj, _ in pairs(visitedDrops) do
+            if not obj or not obj.Parent then
+                visitedDrops[obj] = nil
+            end
+        end
+    end
+end)
+
+--[================================================================]--
+--                     UI INTERACTION LOGIC                         --
+--[================================================================]--
+
+local function updateStatusText()
+    if isAutoFarmRunning and isCashierFarmRunning then
+        StatusLabel.Text = "Farming Both"
+        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+    elseif isAutoFarmRunning then
+        StatusLabel.Text = "Money Drops"
+        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+    elseif isCashierFarmRunning then
+        StatusLabel.Text = "Cashiers"
+        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+    else
+        StatusLabel.Text = "Stopped"
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    end
+end
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    isAutoFarmRunning = not isAutoFarmRunning
+    if isAutoFarmRunning then
+        TweenService:Create(ToggleCircle, TweenInfo.new(0.2), {Position = UDim2.new(1, -21, 0.5, -9)}):Play()
+        TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 170, 255)}):Play()
+        sendNotification("Da Hood Auto Farm", "Money Drop Farm started!")
+    else
+        TweenService:Create(ToggleCircle, TweenInfo.new(0.2), {Position = UDim2.new(0, 3, 0.5, -9)}):Play()
+        TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50, 50, 60)}):Play()
+        sendNotification("Da Hood Auto Farm", "Money Drop Farm stopped.")
+    end
+    updateStatusText()
+end)
+
+CashierToggleBtn.MouseButton1Click:Connect(function()
+    isCashierFarmRunning = not isCashierFarmRunning
+    if isCashierFarmRunning then
+        TweenService:Create(CashierToggleCircle, TweenInfo.new(0.2), {Position = UDim2.new(1, -21, 0.5, -9)}):Play()
+        TweenService:Create(CashierToggleCircle, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 170, 255)}):Play()
+        sendNotification("Da Hood Auto Farm", "Cashier Farm started!")
+    else
+        TweenService:Create(CashierToggleCircle, TweenInfo.new(0.2), {Position = UDim2.new(0, 3, 0.5, -9)}):Play()
+        TweenService:Create(CashierToggleCircle, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50, 50, 60)}):Play()
+        sendNotification("Da Hood Auto Farm", "Cashier Farm stopped.")
+    end
+    updateStatusText()
+end)
+
+local minimized = false
+MinimizeButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        MinimizeButton.Text = "+"
+        Container.Visible = false
+        TweenService:Create(MainFrame, TweenInfo.new(0.2), {Size = UDim2.new(0, 320, 0, 40)}):Play()
+    else
+        MinimizeButton.Text = "-"
+        Container.Visible = true
+        TweenService:Create(MainFrame, TweenInfo.new(0.2), {Size = UDim2.new(0, 320, 0, 420)}):Play()
+    end
+end)
